@@ -22,6 +22,8 @@ from threads.PostProcessor import PostProcessor
 from ui.ui_main import Ui_MainWindow
 from ui.AboutDialog import AboutDialog
 from ui.pbar import PopUpProgressBar
+from ui.stacked_pbar import StackedProgressBar
+
 
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
@@ -90,9 +92,10 @@ class MainWindow(QMainWindow):
             self.postP.moveToThread(self.postP_thread)
             self.postP_thread.started.connect(self.postP.run)
             self.postP_thread.start()
-            self.postP.open_pbar.connect(self._openPbar)
-            self.postP.hide_pbar.connect(self._hidePbar)
-            self.postP.update_pbar.connect(self._updatePbar)
+            self.postP.open_pbar.connect(self._openStackedPbar)
+            self.postP.hide_pbar.connect(self._hideStackedPbar)
+            self.postP.update_subpbar.connect(self._updateStackedPbar)
+            self.postP.update_mainpbar.connect(self._updateMainStackedPbar)
             self.postP.results.connect(self._processRes)
             self.postP.finished.connect(self.postP_thread.quit)
             self.ui.btn_startBatchPros.setEnabled(False)
@@ -385,6 +388,23 @@ class MainWindow(QMainWindow):
 
     def _hidePbar(self):
         self.pbar.hide()
+
+    def _openStackedPbar(self):
+        self.spbar = StackedProgressBar(self)
+        self.spbar.show()
+
+    def _updateStackedPbar(self,value,text):
+        # logger.info(f'Sub Pbar: {value},{text}')
+        self.spbar.on_count_changed(value)
+        self.spbar.on_text_changed(text)
+
+    def _updateMainStackedPbar(self,value,text):
+        logger.info(f'Main Pbar: {value},{text}')
+        self.spbar.on_main_count_changed(value)
+        self.spbar.on_main_text_changed(text)
+
+    def _hideStackedPbar(self):
+        self.spbar.hide()
 
     def start_thread(self,**kwargs):
         self.ui.statusBar.showMessage("Processing Data")

@@ -23,7 +23,8 @@ class PostProcessor(QtCore.QObject):
     results = pyqtSignal(object)
     open_pbar = pyqtSignal()
     hide_pbar = pyqtSignal()
-    update_pbar = pyqtSignal(int,str)
+    update_subpbar = pyqtSignal(int,str)
+    update_mainpbar = pyqtSignal(int,str)
 
     def __init__(self,fname,dirSelected,db,ui):
         super(PostProcessor, self).__init__()
@@ -37,7 +38,7 @@ class PostProcessor(QtCore.QObject):
     def run(self):
         sum_results = []
         self.open_pbar.emit()
-        self.update_pbar.emit(0,f"Processing file {self.cnt}/{self.total}")
+        self.updateStatus()
         # pool = ThreadPool(2)
         # pool.map_async(self.fun, self.fname, callback=self.handle_result)
         for f in self.fname:
@@ -50,7 +51,7 @@ class PostProcessor(QtCore.QObject):
     def updateStatus(self):
         self.cnt += 1
         perCmpl = round(self.cnt/self.total*100,2)
-        self.update_pbar.emit(perCmpl,f"Processing file {self.cnt}/{self.total}")
+        self.update_mainpbar.emit(perCmpl,f"Processing file {self.cnt}/{self.total}")
         logger.info(f"Processing file {self.cnt}/{self.total}")
 
     def fetchDb(self,p_no,date,hour):
@@ -82,6 +83,7 @@ class PostProcessor(QtCore.QObject):
             raise Exception
 
     def fun(self,arg):
+        self.update_subpbar.emit(10,f"Processing file {arg}")
         path = self.dirSelected + '/' + arg
         p_no = arg.replace('.txt','').split('_')[1]
         date = arg.replace('.txt','').split('_')[2]
@@ -90,6 +92,7 @@ class PostProcessor(QtCore.QObject):
             Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
         except:
             logger.info(f'Calculating results... {arg}')
+            self.update_subpbar.emit(20,f"Calculating results... {arg}")
             f = open(path, "r")
             pressure, flow = [], []
             P, Q, Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
@@ -99,6 +102,7 @@ class PostProcessor(QtCore.QObject):
                 if ("BS," in line) == True:
                     pass
                 elif ("BE" in line) == True:
+                    b_count += 1
                     E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
                     if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
                         for i in range(len(pressure)):
@@ -118,11 +122,11 @@ class PostProcessor(QtCore.QObject):
                         q_split = float(section[0])
                         pressure.append(round(p_split,1))
                         flow.append(round(q_split,1))
-                        b_count += 1
                     except:
                         pass
             logger.info('Calculation completed')
-            b_type = self._get_prediction(path)
+            self.update_subpbar.emit(30,f"Calculation completed... {arg}")
+            b_type = self._get_prediction(path,b_count)
             self.saveDb(P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
             
         dObj = {
@@ -145,16 +149,22 @@ class PostProcessor(QtCore.QObject):
 
    
 
-    def _get_prediction(self,path):
+    def _get_prediction(self,path,b_count):
         b_type, pressure = [], []
+        now_count = 0
+
         logger.info(f'Loading model...{path}')
+        self.update_subpbar.emit(40,f'Loading model...{path}')
         model_name, self.PClassiModel = get_current_model()
         logger.info(f'Starting breath prediction...{path}')
+        self.update_subpbar.emit(40,f'Starting breath prediction...{path}')
         try:
             f = open(path, "r")
             for line in f:
                 if ("BS," in line) == True:
-                    pass
+                    now_count += 1
+                    progress = int((now_count/b_count)*100)
+                    self.update_subpbar.emit(progress,'Predicting breath ...')
                 elif ("BE" in line) == True:
                     if len(pressure) != 0:
                         b_type.append(predict(pressure, self.PClassiModel))
