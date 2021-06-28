@@ -1,0 +1,426 @@
+"""MainWindow
+
+Returns:
+    [type]: [description]
+"""
+
+# Standard library imports
+from os import listdir
+from os.path import isfile, join
+import statistics
+import csv
+import os
+import logging
+
+# Third party imports
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtWidgets import QApplication, QMainWindow, QStatusBar, QTextEdit, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGridLayout, QFileDialog, QTableWidgetItem, QProgressBar, QHeaderView, QMessageBox
+from PyQt5.QtSql import  QSqlQuery
+
+# Local application imports
+from threads.worker import Worker
+from threads.PostProcessor import PostProcessor
+from ui.ui_main import Ui_MainWindow
+from ui.AboutDialog import AboutDialog
+from ui.pbar import PopUpProgressBar
+
+# Get the logger specified in the file
+logger = logging.getLogger(__name__)
+
+class MainWindow(QMainWindow):
+    def __init__(self,db):
+        super(MainWindow, self).__init__()
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+        self._connectSignals()
+        self.db = db
+        self._setTableHeader()
+        self.about = AboutDialog(self)
+
+    
+    def _setTableHeader(self):
+        labels = ['Ers\n(cmH\u2082O/L)','Rrs\n(cmH\u2082Os/L)','PEEP\n(cmH\u2082O)','PIP\n(cmH\u2082O)','Vₜ\n(mL)','PIP-PEEP\n(cmH\u2082O)']
+        for i in range(len(labels)):
+            self.ui.tableWidget.horizontalHeaderItem(i).setText(labels[i])
+            self.ui.tableWidget_2.horizontalHeaderItem(i).setText(labels[i])
+    
+    def _openExampleFile(self):
+        self.ui.btn_start.setEnabled(False)
+        self.ui.btn_openFDialog.setEnabled(False)
+        self.ui.btn_export.setEnabled(False)
+        fname = "patient_P0008_2018-03-29_00-00-00.txt"
+        base_path = os.path.abspath(os.path.dirname(__file__))
+        self.fname = os.path.join(base_path,'..\src',fname)
+        logging.info('Example file %s opened', fname)
+        self._listFileDetails(self.fname)
+        self.start_thread()
+
+    def _openFileNameDialog(self):
+        self.ui.btn_start.setEnabled(False)
+        self.ui.btn_openFDialog.setEnabled(False)
+        self.ui.btn_export.setEnabled(False)
+        options = QFileDialog.Options()
+        fileName, _ = QFileDialog.getOpenFileName(self,"QFileDialog.getOpenFileName()", "","Text Files (*.txt)", options=options)
+        if fileName:
+            self.fname = fileName
+            self._listFileDetails(fileName)
+            self.start_thread()
+        else:
+            self.ui.btn_start.setEnabled(True)  # Re-enable choose btn if user cancel on file selection dialog
+            self.ui.btn_openFDialog.setEnabled(True)
+
+    
+    def _openFileDirectory(self):
+
+        dirSelected = str(QFileDialog.getExistingDirectory(self, "Select Directory"))
+        if dirSelected != "":
+            self.ui.lineEdit_dir.setText(dirSelected)
+            logger.info(f'Directory selected: {dirSelected}')
+            self.dirSelected = dirSelected
+            self.ui.btn_startBatchPros.setEnabled(True)
+
+    def _startBatchPros(self):
+        # get all files in dirSelected
+        files = [f for f in listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
+        files_sanitised = [f for f in files if f.endswith('.txt')]
+        logger.info(f'files raw: {files}')
+        logger.info(f'files sanitised: {files_sanitised}')
+        if len(files_sanitised) != 0:
+            self.postP = PostProcessor(fname=files,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
+            self.postP_thread = QtCore.QThread()
+            self.postP.moveToThread(self.postP_thread)
+            self.postP_thread.started.connect(self.postP.run)
+            self.postP_thread.start()
+            self.postP.open_pbar.connect(self._openPbar)
+            self.postP.hide_pbar.connect(self._hidePbar)
+            self.postP.update_pbar.connect(self._updatePbar)
+            self.postP.results.connect(self._processRes)
+            self.postP.finished.connect(self.postP_thread.quit)
+            self.ui.btn_startBatchPros.setEnabled(False)
+        else:
+            logger.error('Cannot open folder. Number of files in folder == 0.')
+            QMessageBox.critical(None, ("Cannot open folder"),
+                                   ("Unable to read files from folder.\n"
+                                    "Please ensure folder selected only containes correctly formatted data. "
+                                    "Only text files are allowed. "
+                                    "Please refer to the CARENet documentation for more information.\n\n"
+                                    "Click Cancel to exit."),
+                    QMessageBox.Cancel)
+
+    def _processRes(self,res):
+        logger.info('_processRes(): Processing completed.')
+        # update ui 
+        self.ui.btn_PO_reset.setEnabled(True)
+        self.ui.statusBar.showMessage("Processing completed.")
+        try:
+            self.ui.label_PO_p_no.setText(res['p_no'])
+            self.ui.label_PO_date.setText(res['date'])
+            self.ui.label_t_hours.setText(str(len(res['hours'])))
+            self.ui.label_PO_bCount.setText(str(res['b_cnt']))
+        except Exception as e:
+            logger.error('_processRes Error: ',e)
+
+        xaxis = []
+        for i in range(len(res['hours'])):
+            xaxis.append(res['hours'][i][0:5])
+
+        params = ['Ers','Rrs','PEEP','PIP','TV','DP']
+        font = QtGui.QFont()
+        font.setPointSize(12)
+        
+
+        self.ui.tableWidget_2.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.ui.tableWidget_2.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        self.ui.poErsWidget.canvas.ax.set_ylabel(r'$cmH_2O/l$')
+        self.ui.poRrsWidget.canvas.ax.set_ylabel(r'$cmH_2Os/l$')
+        self.ui.poPIPWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
+        self.ui.poPEEPWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
+        self.ui.poVtWidget.canvas.ax.set_ylabel('ml')
+        self.ui.poDpWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
+        self.ui.poErsWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poRrsWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poPIPWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poPEEPWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poVtWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poDpWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poErsWidget.canvas.ax.boxplot(res['Ers']['raw'],labels=xaxis, showfliers=False)
+        self.ui.poRrsWidget.canvas.ax.boxplot(res['Rrs']['raw'],labels=xaxis, showfliers=False)
+        self.ui.poPIPWidget.canvas.ax.boxplot(res['PIP']['raw'],labels=xaxis, showfliers=False)
+        self.ui.poPEEPWidget.canvas.ax.boxplot(res['PEEP']['raw'],labels=xaxis, showfliers=False)
+        self.ui.poVtWidget.canvas.ax.boxplot(res['TV']['raw'],labels=xaxis, showfliers=False)
+        self.ui.poDpWidget.canvas.ax.boxplot(res['DP']['raw'],labels=xaxis, showfliers=False)
+        self.ui.poErsWidget.canvas.draw()
+        self.ui.poRrsWidget.canvas.draw()
+        self.ui.poPIPWidget.canvas.draw()
+        self.ui.poPEEPWidget.canvas.draw()
+        self.ui.poVtWidget.canvas.draw()
+        self.ui.poDpWidget.canvas.draw()
+
+        b_types = res['b_type']
+        Asyn, Norm, Asyn_perc, Norm_perc, Total = [],[],[],[],[]
+        for b in b_types:
+            Asyn.append(b.count('Asyn'))
+            Norm.append(b.count('Normal'))
+            Total.append(b.count('Asyn')+b.count('Normal'))
+            Asyn_perc.append(b.count('Asyn')/(b.count('Asyn')+b.count('Normal'))*100)
+            Norm_perc.append(b.count('Normal')/(b.count('Asyn')+b.count('Normal'))*100)
+        self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
+        
+        labels = xaxis
+        width = 0.35
+        self.ui.poAIWidget.canvas.ax.bar(labels,Norm_perc, width, label='Normal')
+        self.ui.poAIWidget.canvas.ax.bar(labels,Asyn_perc, width, bottom=Norm_perc, label='Asynchrony')
+        self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
+        self.ui.poAIWidget.canvas.ax.legend()
+        self.ui.poAIWidget.canvas.draw()
+        # self.ui.ai_breath_label.setText(str(AIndex))
+
+    def _listFileDetails(self,fullFileName):
+        fname = fullFileName.split('/')[-1].replace('.txt','')
+        self.ui.label_pat_no.setText(fname.split('_')[1])
+        self.ui.label_date.setText(fname.split('_')[2])
+        self.ui.label_hour.setText(fname.split('_')[3])
+        self.hour = fname.split('_')[3]
+    
+    def _resetScreen(self):
+        self.ui.graphWidget.canvas.ax.cla()
+        self.ui.boxGraphWidget.canvas.ax1.cla()
+        self.ui.boxGraphWidget.canvas.ax2.cla()
+        self.ui.boxGraphWidget.canvas.ax3.cla()
+        self.ui.boxGraphWidget.canvas.ax4.cla()
+        self.ui.boxGraphWidget.canvas.ax5.cla()
+        self.ui.boxGraphWidget.canvas.ax6.cla()
+        self.ui.pieGraphWidget.canvas.ax.cla()
+        self.ui.graphWidget.canvas.draw()
+        self.ui.boxGraphWidget.canvas.draw()
+        self.ui.pieGraphWidget.canvas.draw()
+        self.ui.tableWidget.clearContents()
+        self.ui.statusBar.showMessage("Screen refreshed")
+        self.ui.btn_start.setEnabled(True)
+        self.ui.btn_openFDialog.setEnabled(True)
+        self.ui.btn_reset.setEnabled(False)
+        self.ui.btn_export.setEnabled(False)
+        self.ui.label_AI.setText('')
+        self.ui.label_breath_no.setText('')
+        self.ui.label_date.setText('')
+        self.ui.label_hour.setText('')
+        self.ui.label_pat_no.setText('')
+        self.ui.norm_breath_label.setText('')
+        self.ui.asyn_breath_label.setText('')
+        self.ui.total_breath_label.setText('')
+        self.ui.ai_breath_label.setText('')
+
+    def _resetPO(self):
+        self.ui.poErsWidget.canvas.ax.cla()
+        self.ui.poRrsWidget.canvas.ax.cla()
+        self.ui.poPIPWidget.canvas.ax.cla()
+        self.ui.poPEEPWidget.canvas.ax.cla()
+        self.ui.poVtWidget.canvas.ax.cla()
+        self.ui.poDpWidget.canvas.ax.cla()
+        self.ui.poAIWidget.canvas.ax.cla()
+        self.ui.poErsWidget.canvas.draw()
+        self.ui.poRrsWidget.canvas.draw()
+        self.ui.poPIPWidget.canvas.draw()
+        self.ui.poPEEPWidget.canvas.draw()
+        self.ui.poVtWidget.canvas.draw()
+        self.ui.poDpWidget.canvas.draw()
+        self.ui.poAIWidget.canvas.draw()
+        self.ui.label_PO_p_no.setText('')
+        self.ui.label_PO_date.setText('')
+        self.ui.label_t_hours.setText('')
+        self.ui.label_PO_bCount.setText('')
+        self.ui.label_PO_AI.setText('')
+        self.ui.lineEdit_dir.setText('')
+        self.ui.tableWidget_2.clearContents()
+        self.ui.statusBar.showMessage("Screen refreshed")
+        self.ui.btn_startBatchPros.setEnabled(True)
+        self.ui.btn_PO_export.setEnabled(False)
+        self.ui.btn_PO_reset.setEnabled(False)
+
+    def showAbout(self):
+        self.about.show()
+
+    def _connectSignals(self):
+        """Connect signals and slots."""
+        # Action tab
+        self.ui.actionAbout.triggered.connect(self.showAbout)
+
+        # First tab
+        self.ui.btn_start.clicked.connect(self._openExampleFile)
+        self.ui.btn_openFDialog.clicked.connect(self._openFileNameDialog)
+        self.ui.btn_reset.clicked.connect(self._resetScreen)
+        self.ui.btn_export.clicked.connect(self._exportRes)
+        # Second tab
+        self.ui.btn_openDirDialog.clicked.connect(self._openFileDirectory)
+        self.ui.btn_startBatchPros.clicked.connect(self._startBatchPros)
+        self.ui.btn_PO_reset.clicked.connect(self._resetPO)
+        self.ui.btn_PO_export.clicked.connect(self._exportPO)
+
+    def _exportPO(self):
+        files = [f for f in listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
+        files_sanitised = [f for f in files if f.endswith('.txt')]
+        first_file = files_sanitised[0]
+        fname = first_file.replace('.txt','')
+        p_no = str(fname.split('_')[1])
+        date = str(fname.split('_')[2])
+        name, _ = QFileDialog.getSaveFileName(self, 'Save File', '',"Comma Seperated values (*.csv)")
+        logger.info(f'User selected export csv filename: {name}')
+        if name != "":
+            query = QSqlQuery(self.db)
+            query.exec(f"""SELECT p_no, date, hour, b_count,
+                            Ers_min,   Ers_max,  Ers_q5,  Ers_q25,  Ers_q50,  Ers_q75,  Ers_q95,
+                            Rrs_min,   Rrs_max,  Rrs_q5,  Rrs_q25,  Rrs_q50,  Rrs_q75,  Rrs_q95,
+                            PEEP_min,  PEEP_max, PEEP_q5, PEEP_q25, PEEP_q50, PEEP_q75, PEEP_q95,
+                            PIP_min,   PIP_max,  PIP_q5,  PIP_q25,  PIP_q50,  PIP_q75,  PIP_q95,
+                            TV_min,    TV_max,   TV_q5,   TV_q25,   TV_q50,   TV_q75,   TV_q95,
+                            DP_min,    DP_max,   DP_q5,   DP_q25,   DP_q50,   DP_q75,   DP_q95  FROM results
+                            WHERE p_no='{p_no}' AND date='{date}';
+                            """)
+                
+            try:
+                with open(name, mode='w', newline='') as csvfile:
+                    w = csv.writer(csvfile)
+                    # write header
+                    w.writerow((
+                        'Patient No.','Record Date','Record Hour','Breath Count',
+                        'Ers_min', 'Ers_max','Ers_q5','Ers_q25','Ers_q50','Ers_q75','Ers_q95',
+                        'Rrs_min', 'Rrs_max','Rrs_q5','Rrs_q25','Rrs_q50','Rrs_q75','Rrs_q95',
+                        'PEEP_min', 'PEEP_max','PEEP_q5','PEEP_q25','PEEP_q50','PEEP_q75','PEEP_q95',
+                        'PIP_min', 'PIP_max','PIP_q5','PIP_q25','PIP_q50','PIP_q75','PIP_q95',
+                        'TV_min', 'TV_max','TV_q5','TV_q25','TV_q50','TV_q75','TV_q95',
+                        'DP_min', 'DP_max','DP_q5','DP_q25','DP_q50','DP_q75','DP_q95'
+                        ))
+                    while query.next():
+                        # Write file
+                        listsTmpData = []
+                        for column in range(46):
+                            listsTmpData.append(str(query.value(column)))
+                        w.writerow(listsTmpData)
+                # Notify user export done
+                self.ui.statusBar.showMessage("Data exported to: "+ name )
+                QMessageBox.information(None, ("Data exported"),
+                                    ("Data exported to: \n"+ name),
+                        QMessageBox.Ok)
+            except PermissionError as e:
+                # Notify user export failed
+                QMessageBox.warning(None, ("Cannot write file"),
+                                ('Error writing file: \n' + str(e)),
+                QMessageBox.Cancel)
+
+    def _exportRes(self):
+        name, _ = QFileDialog.getSaveFileName(self, 'Save File', '',"Comma Seperated values (*.csv)")
+        logger.info(f'User selected export csv filename: {name}')
+        if name != "":
+            fname = self.fname.replace('.txt','')
+            p_no = str(fname.split('_')[1])
+            date = str(fname.split('_')[2])
+            hour = str(fname.split('_')[3])
+            query = QSqlQuery(self.db)
+            query.exec(f"""SELECT p_no, date, hour, b_count,
+                            Ers_min,   Ers_max,  Ers_q5,  Ers_q25,  Ers_q50,  Ers_q75,  Ers_q95,
+                            Rrs_min,   Rrs_max,  Rrs_q5,  Rrs_q25,  Rrs_q50,  Rrs_q75,  Rrs_q95,
+                            PEEP_min,  PEEP_max, PEEP_q5, PEEP_q25, PEEP_q50, PEEP_q75, PEEP_q95,
+                            PIP_min,   PIP_max,  PIP_q5,  PIP_q25,  PIP_q50,  PIP_q75,  PIP_q95,
+                            TV_min,    TV_max,   TV_q5,   TV_q25,   TV_q50,   TV_q75,   TV_q95,
+                            DP_min,    DP_max,   DP_q5,   DP_q25,   DP_q50,   DP_q75,   DP_q95  FROM results
+                            WHERE p_no='{p_no}' AND date='{date}' AND hour='{hour}';
+                            """)
+            # if query.exec_():
+            #     print("DB entry retrieved successful")
+            # else:
+            #     print("Error: ", query.lastError().text())
+                
+            try:
+                with open(name, mode='w', newline='') as csvfile:
+                    w = csv.writer(csvfile)
+                    # write header
+                    w.writerow((
+                        'Patient No.','Record Date','Record Hour','Breath Count',
+                        'Ers_min', 'Ers_max','Ers_q5','Ers_q25','Ers_q50','Ers_q75','Ers_q95',
+                        'Rrs_min', 'Rrs_max','Rrs_q5','Rrs_q25','Rrs_q50','Rrs_q75','Rrs_q95',
+                        'PEEP_min', 'PEEP_max','PEEP_q5','PEEP_q25','PEEP_q50','PEEP_q75','PEEP_q95',
+                        'PIP_min', 'PIP_max','PIP_q5','PIP_q25','PIP_q50','PIP_q75','PIP_q95',
+                        'TV_min', 'TV_max','TV_q5','TV_q25','TV_q50','TV_q75','TV_q95',
+                        'DP_min', 'DP_max','DP_q5','DP_q25','DP_q50','DP_q75','DP_q95'
+                        ))
+                    while query.next():
+                        # Write file
+                        listsTmpData = []
+                        for column in range(46):
+                            listsTmpData.append(str(query.value(column)))
+                        w.writerow(listsTmpData)
+                # Notify user export done
+                self.ui.statusBar.showMessage("Data exported to: "+ name )
+                QMessageBox.information(None, ("Data exported"),
+                                    ("Data exported to: \n"+ name),
+                        QMessageBox.Ok)
+            except PermissionError as e:
+                # Notify user export failed
+                QMessageBox.warning(None, ("Cannot write file"),
+                                ('Error writing file: \n' + str(e)),
+                QMessageBox.Cancel)
+            
+        
+    def _updateUI(self):
+        """ Update UI and status after calculation done"""
+        # Update UI and status
+        self.ui.btn_reset.setEnabled(True)
+        self.ui.btn_export.setEnabled(True)
+        self.ui.statusBar.showMessage(f"Processing Completed ")
+        # Resize table headers. Can't be done in thread(unknown reason)
+        self.ui.tableWidget.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.ui.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # Hide the progress bar
+        self.pbar.hide()
+        
+    def _openPbar(self):
+        self.pbar = PopUpProgressBar(self)
+        self.pbar.show()
+
+    def _updatePbar(self,value,text):
+        logger.info(f'Pbar: {value},{text}')
+        self.pbar.on_count_changed(value)
+        self.pbar.on_text_changed(text)
+
+    def _hidePbar(self):
+        self.pbar.hide()
+
+    def start_thread(self,**kwargs):
+        self.ui.statusBar.showMessage("Processing Data")
+        self.worker = Worker(fname=self.fname,db=self.db,ui=self.ui)
+        self.worker_thread = QtCore.QThread()
+        self.worker.setObjectName('Worker')
+        self.worker_thread.setObjectName('WorkerThread')
+        self.worker.moveToThread(self.worker_thread)
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker.open_pbar.connect(self._openPbar)
+        self.worker.update_pbar.connect(self._updatePbar)
+        self.worker.update_UI.connect(self._updateUI)
+        self.worker.finished.connect(self.worker_thread.quit)
+        self.worker.done.connect(self.stop_thread)
+        self.worker_thread.start()
+        print('Worker thread started')
+
+    def stop_thread(self):
+        self.worker_thread.requestInterruption()
+        if self.worker_thread.isRunning():
+            self.worker_thread.quit()
+            self.worker_thread.wait()
+            print('qthread stopped')
+        else:
+            print('worker has already exited.')
+
+
+
+
+
+
+if __name__ == '__main__':
+    import sys
+    app = QApplication(sys.argv)
+    window = Window()
+    window.show()
+    sys.exit(app.exec_())

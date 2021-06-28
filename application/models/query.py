@@ -1,0 +1,93 @@
+from PyQt5.QtSql import QSqlDatabase, QSqlQuery
+import logging
+
+logger = logging.getLogger(__name__)
+logger.info('Models module imported')
+
+def createTable(db):
+    # Create a query and execute it right away using .exec()
+    logger.info('Creating db table if not exists')
+    createTableQuery = QSqlQuery(db)
+    createTableQuery.exec(
+        """
+        CREATE TABLE IF NOT EXISTS results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT UNIQUE NOT NULL,
+            p_no VARCHAR(50) NOT NULL,
+            date VARCHAR(40) NOT NULL,
+            hour VARCHAR(40) NOT NULL,
+            p BLOB,
+            q BLOB,
+            Ers_raw BLOB,
+            Rrs_raw BLOB,
+            PEEP_raw BLOB,
+            PIP_raw BLOB,
+            TV_raw BLOB,
+            DP_raw BLOB,
+            b_type BLOB,
+            b_count INTEGER,
+            
+            --q5 reading
+            Ers_q5 REAL,
+            Rrs_q5 REAL,
+            PEEP_q5 REAL,
+            PIP_q5 REAL,
+            TV_q5 REAL,
+            DP_q5 REAL,
+
+            --q25 reading
+            Ers_q25 REAL,
+            Rrs_q25 REAL,
+            PEEP_q25 REAL,
+            PIP_q25 REAL,
+            TV_q25 REAL,
+            DP_q25 REAL,
+
+            --q50 reading
+            Ers_q50 REAL,
+            Rrs_q50 REAL,
+            PEEP_q50 REAL,
+            PIP_q50 REAL,
+            TV_q50 REAL,
+            DP_q50 REAL,
+
+            --q75 reading
+            Ers_q75 REAL,
+            Rrs_q75 REAL,
+            PEEP_q75 REAL,
+            PIP_q75 REAL,
+            TV_q75 REAL,
+            DP_q75 REAL,
+
+            --q95 reading
+            Ers_q95 REAL,
+            Rrs_q95 REAL,
+            PEEP_q95 REAL,
+            PIP_q95 REAL,
+            TV_q95 REAL,
+            DP_q95 REAL,
+
+            --min reading
+            Ers_min REAL,
+            Rrs_min REAL,
+            PEEP_min REAL,
+            PIP_min REAL,
+            TV_min REAL,
+            DP_min REAL,
+
+            --max reading
+            Ers_max REAL,
+            Rrs_max REAL,
+            PEEP_max REAL,
+            PIP_max REAL,
+            TV_max REAL,
+            DP_max REAL,
+
+            --AI data
+            AI_Norm_cnt REAL,
+            AI_Asyn_cnt REAL,
+            AI_Nois_cnt REAL,
+            AI_Index REAL
+            
+        )
+        """
+    )

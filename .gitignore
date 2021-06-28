@@ -1,3 +1,14 @@
+application/__pycache__
+application/build
+application/dist
+*.logs
+
+
+
+*.sqlite
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
