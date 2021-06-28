@@ -1,26 +1,36 @@
+# =============================================================================
 # Standard library imports
+# =============================================================================
 import os
 import sys
+import logging.config
 
-# set env
+#==============================================================================
+# Set Environment variables
+#==============================================================================
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 
-# Third party imports
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtSql import QSqlDatabase, QSqlQuery
-from PyQt5 import QtCore
-# from keras import backend as K
+#==============================================================================
+# Third-party imports
+#==============================================================================
+from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtSql import QSqlDatabase
 import matplotlib.pyplot as plt
 import matplotlib
-import logging.config
+# from keras import backend as K
+
+#==============================================================================
+# Setup Logging
+#==============================================================================
 log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'logs/logging.conf')
 logging.config.fileConfig(fname=log_path, disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
 
+#==============================================================================
 # Local application imports
+#==============================================================================
 from ui.mainwindow import MainWindow
 from models.query import createTable
 

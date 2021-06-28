@@ -5,7 +5,6 @@ Returns:
 """
 
 # Standard library imports
-from os import listdir
 from os.path import isfile, join
 import statistics
 import csv
@@ -13,10 +12,9 @@ import os
 import logging
 
 # Third party imports
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtWidgets import QApplication, QMainWindow, QStatusBar, QTextEdit, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QGridLayout, QFileDialog, QTableWidgetItem, QProgressBar, QHeaderView, QMessageBox
-from PyQt5.QtSql import  QSqlQuery
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QHeaderView, QMessageBox
+from PyQt5.QtSql import QSqlQuery
 
 # Local application imports
 from threads.worker import Worker
@@ -82,7 +80,7 @@ class MainWindow(QMainWindow):
 
     def _startBatchPros(self):
         # get all files in dirSelected
-        files = [f for f in listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
+        files = [f for f in os.listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
         files_sanitised = [f for f in files if f.endswith('.txt')]
         logger.info(f'files raw: {files}')
         logger.info(f'files sanitised: {files_sanitised}')
@@ -260,7 +258,7 @@ class MainWindow(QMainWindow):
         self.ui.btn_PO_export.clicked.connect(self._exportPO)
 
     def _exportPO(self):
-        files = [f for f in listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
+        files = [f for f in os.listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
         files_sanitised = [f for f in files if f.endswith('.txt')]
         first_file = files_sanitised[0]
         fname = first_file.replace('.txt','')
