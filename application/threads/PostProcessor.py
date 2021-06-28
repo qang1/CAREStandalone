@@ -51,7 +51,7 @@ class PostProcessor(QtCore.QObject):
     def updateStatus(self):
         self.cnt += 1
         perCmpl = round(self.cnt/self.total*100,2)
-        self.update_mainpbar.emit(perCmpl,f"Processing file {self.cnt}/{self.total}")
+        self.update_mainpbar.emit(perCmpl,f"Total: Processing file {self.cnt}/{self.total}")
         logger.info(f"Processing file {self.cnt}/{self.total}")
 
     def fetchDb(self,p_no,date,hour):
