@@ -10,6 +10,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtSql import  QSqlQuery
 import numpy as np
 import logging
+from keras import backend as K
 
 # Local application imports
 from calculations import Elastance, _calcQuartiles
@@ -49,9 +50,9 @@ class PostProcessor(QtCore.QObject):
 
     
     def updateStatus(self):
-        self.cnt += 1
         perCmpl = round(self.cnt/self.total*100,2)
         self.update_mainpbar.emit(perCmpl,f"Total: Processing file {self.cnt}/{self.total}")
+        self.cnt += 1
         logger.info(f"Processing file {self.cnt}/{self.total}")
 
     def fetchDb(self,p_no,date,hour):
@@ -103,17 +104,18 @@ class PostProcessor(QtCore.QObject):
                     pass
                 elif ("BE" in line) == True:
                     b_count += 1
-                    E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
-                    if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
-                        for i in range(len(pressure)):
-                            Ers.append(E)
-                            Rrs.append(R)
-                        P.extend(pressure)
-                        Q.extend(flow)
-                        PEEP_A.append(round(PEEP,1))
-                        PIP_A.append(round(PIP,1))
-                        TV_A.append(round(TidalVolume*1000))
-                        DP_A.append(round(PIP-PEEP,1))
+                    if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
+                        E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
+                        if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
+                            for i in range(len(pressure)):
+                                Ers.append(E)
+                                Rrs.append(R)
+                            P.extend(pressure)
+                            Q.extend(flow)
+                            PEEP_A.append(round(PEEP,1))
+                            PIP_A.append(round(PIP,1))
+                            TV_A.append(round(TidalVolume*1000))
+                            DP_A.append(round(PIP-PEEP,1))
                     pressure, flow = [], [] # reset temp list
                 else:
                     section = line.split(',')
@@ -155,6 +157,7 @@ class PostProcessor(QtCore.QObject):
 
         logger.info(f'Loading model...{path}')
         self.update_subpbar.emit(40,f'Loading model...{path}')
+        K.clear_session()
         model_name, self.PClassiModel = get_current_model()
         logger.info(f'Starting breath prediction...{path}')
         self.update_subpbar.emit(40,f'Starting breath prediction...{path}')

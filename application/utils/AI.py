@@ -1,6 +1,6 @@
 import os
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.models import load_model
+from keras.preprocessing.sequence import pad_sequences
+from keras.models import load_model
 from scipy.interpolate import interp1d
 import numpy as np
 import random

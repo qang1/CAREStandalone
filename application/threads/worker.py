@@ -16,6 +16,7 @@ from utils.AI import get_current_model, predict
 
 from matplotlib.dates import DateFormatter
 from datetime import datetime, timedelta
+from keras import backend as K
 
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
@@ -36,13 +37,12 @@ class Worker(QtCore.QObject):
         self.db = db
         self.ui = ui
         self.hour = self.fname.split('/')[-1].replace('.txt','').split('_')[3]
-
+        self.model_name = None
 
     def _get_prediction(self,b_count):
         b_type, pressure = [], []
         now_count = 0
         self.update_pbar.emit(50,'Loading model ...')
-        model_name, PClassiModel = get_current_model()
         self.update_pbar.emit(60,'Starting breath prediction...')
         f = open(self.fname, "r")
         for line in f:
@@ -52,15 +52,16 @@ class Worker(QtCore.QObject):
                 self.update_pbar.emit(progress,'Predicting breath ...')
             elif ("BE" in line) == True:
                 if len(pressure) != 0:
-                    b_type.append(predict(pressure, PClassiModel))
+                    b_type.append(predict(pressure, self.PClassiModel))
                 pressure = [] # reset pressure list
             else:
-                section = line.split(',')
-                try:
-                    p_split = float(section[1])
-                    pressure.append(round(p_split,1))
-                except:
-                    pass
+                if line != '': # Filter out empty lines
+                    section = line.split(',') # 2.34, 5.78 -> ['2.34','5.78']
+                    try:
+                        p_split = float(section[1])
+                        pressure.append(round(p_split,1))
+                    except:
+                        pass
         
         return b_type
 
@@ -76,34 +77,38 @@ class Worker(QtCore.QObject):
                 pass
             elif ("BE" in line) == True:
                 b_count += 1
+                if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
+                    E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
                 
-                E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
-                
-                if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
-                    for i in range(len(pressure)):
-                        Ers.append(E)
-                        Rrs.append(R)
-                    P.extend(pressure)
-                    Q.extend(flow)
-                    PEEP_A.append(round(PEEP,1))
-                    PIP_A.append(round(PIP,1))
-                    TV_A.append(round(TidalVolume*1000))
-                    DP_A.append(round(PIP-PEEP,1))
+                    if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
+                        for i in range(len(pressure)):
+                            Ers.append(E)
+                            Rrs.append(R)
+                        P.extend(pressure)
+                        Q.extend(flow)
+                        PEEP_A.append(round(PEEP,1))
+                        PIP_A.append(round(PIP,1))
+                        TV_A.append(round(TidalVolume*1000))
+                        DP_A.append(round(PIP-PEEP,1))
                 pressure, flow = [], [] # reset temp list
             else:
-                section = line.split(',')
-                try:
-                    p_split = float(section[1])
-                    q_split = float(section[0])
-                    pressure.append(round(p_split,1))
-                    flow.append(round(q_split,1))
-                except:
-                    pass
+                if line != '': # Filter out empty lines
+                    section = line.split(',') # 2.34, 5.78 -> ['2.34','5.78']
+                    try:
+                        p_split = float(section[1])
+                        q_split = float(section[0])
+                        pressure.append(round(p_split,1))
+                        flow.append(round(q_split,1))
+                    except:
+                        pass
         b_type = self._get_prediction(b_count)
         self.update_pbar.emit(80,'Calculation complete. Processing data...')
         return P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A
 
     def run(self):
+        K.clear_session()
+        self.model_name, self.PClassiModel = get_current_model()
+
         logging.info('Running run thread in worker ...')
         self.open_pbar.emit()
         try:
