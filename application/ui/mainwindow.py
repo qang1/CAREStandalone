@@ -21,6 +21,7 @@ from threads.worker import Worker
 from threads.PostProcessor import PostProcessor
 from ui.ui_main import Ui_MainWindow
 from ui.AboutDialog import AboutDialog
+from ui.SettingsDialog import SettingsDialog
 from ui.pbar import PopUpProgressBar
 from ui.stacked_pbar import StackedProgressBar
 
@@ -33,10 +34,13 @@ class MainWindow(QMainWindow):
         super(MainWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+        self.settings = QtCore.QSettings()
+        keys = self.settings.allKeys()
+
+        print(keys)
         self._connectSignals()
         self.db = db
         self._setTableHeader()
-        self.about = AboutDialog(self)
 
     
     def _setTableHeader(self):
@@ -84,10 +88,11 @@ class MainWindow(QMainWindow):
         # get all files in dirSelected
         files = [f for f in os.listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
         files_sanitised = [f for f in files if f.endswith('.txt')]
+        files_sanitised = [f for f in files if f.startswith('patient')]
         logger.info(f'files raw: {files}')
         logger.info(f'files sanitised: {files_sanitised}')
         if len(files_sanitised) != 0:
-            self.postP = PostProcessor(fname=files,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
+            self.postP = PostProcessor(fname=files_sanitised,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
             self.postP_thread = QtCore.QThread()
             self.postP.moveToThread(self.postP_thread)
             self.postP_thread.started.connect(self.postP.run)
@@ -242,12 +247,18 @@ class MainWindow(QMainWindow):
         self.ui.btn_PO_reset.setEnabled(False)
 
     def showAbout(self):
+        self.about = AboutDialog(self)
         self.about.show()
 
+    def showSettings(self):
+        self.settings = SettingsDialog(self)
+        self.settings.show()
+        
     def _connectSignals(self):
         """Connect signals and slots."""
         # Action tab
         self.ui.actionAbout.triggered.connect(self.showAbout)
+        self.ui.actionSettings.triggered.connect(self.showSettings)
 
         # First tab
         self.ui.btn_start.clicked.connect(self._openExampleFile)

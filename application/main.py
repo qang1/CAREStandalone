@@ -65,6 +65,9 @@ def db_handle():
 def main():
     logger.info('Program start up')
     app = QApplication(sys.argv)
+    app.setOrganizationName("CARENet")
+    app.setOrganizationDomain("caresoft.live")
+    app.setApplicationName("CARENet Standalone")
     db = db_handle()
     createTable(db)
     window = MainWindow(db)
