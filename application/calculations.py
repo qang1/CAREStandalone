@@ -95,6 +95,10 @@ class Elastance():
         # linear algebra method to return least square solution
         Ers, Rrs, = np.linalg.lstsq(A, B, rcond=-1)[0]
 
+        # round Ers, Rrs to one decimal point
+        Ers = np.around(Ers,1)
+        Rrs = np.around(Rrs,1)
+
         TidalVolume = max(V)
         # PEEP_non_array = pressure_inspi[0]
         # PEEP_non_array = min(pressure_expi)

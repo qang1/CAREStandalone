@@ -23,13 +23,13 @@ logger = logging.getLogger(__name__)
 logger.info('Thread module imported')
 
 class Worker(QtCore.QObject):
-    finished = pyqtSignal()
-    done = pyqtSignal()
-    open_pbar = pyqtSignal()
+    finished    = pyqtSignal()
+    done        = pyqtSignal()
+    open_pbar   = pyqtSignal()
     update_pbar = pyqtSignal(int,str)
-    update_UI = pyqtSignal()
-    status = pyqtSignal(int)
-    run_token = True
+    update_UI   = pyqtSignal()
+    status      = pyqtSignal(int)
+    run_token   = True
 
     def __init__(self,fname,db,ui):
         super(Worker, self).__init__()
@@ -42,7 +42,6 @@ class Worker(QtCore.QObject):
     def _get_prediction(self,b_count):
         b_type, pressure = [], []
         now_count = 0
-        self.update_pbar.emit(50,'Loading model ...')
         self.update_pbar.emit(60,'Starting breath prediction...')
         f = open(self.fname, "r")
         for line in f:
@@ -106,7 +105,8 @@ class Worker(QtCore.QObject):
         return P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A
 
     def run(self):
-        K.clear_session()
+        K.clear_session() # Clear keras backend last session to prevent crash
+        self.update_pbar.emit(50,'Loading model ...')
         self.model_name, self.PClassiModel = get_current_model()
 
         logging.info('Running run thread in worker ...')

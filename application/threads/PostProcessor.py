@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class PostProcessor(QtCore.QObject):
     finished = pyqtSignal()
-    results = pyqtSignal(object)
+    processResMulti = pyqtSignal(object)
     open_pbar = pyqtSignal()
     hide_pbar = pyqtSignal()
     update_subpbar = pyqtSignal(int,str)
@@ -40,11 +40,91 @@ class PostProcessor(QtCore.QObject):
         sum_results = []
         self.open_pbar.emit()
         self.updateStatus()
+        # Uncomment below to use threading (Not working correctly currently)
         # pool = ThreadPool(2)
         # pool.map_async(self.fun, self.fname, callback=self.handle_result)
-        for f in self.fname:
-            dObj = self.fun(f)
-            sum_results.append(dObj)
+        chopHalf = True
+        if chopHalf == True:
+            for f in self.fname:
+                _, p_no, date, hour = f.replace('.txt','').split('_')
+                path = f'{self.dirSelected}/{f}'
+                f = open(path, "r")
+                pressure, flow, b_type = [], [], []
+                P, Q, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
+                b_count = 0
+                for line in f:
+                    if ("BS," in line) == True:
+                        pass
+                    elif ("BE" in line) == True:
+                        b_count += 1
+                        if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
+                            E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
+                            if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
+                                for i in range(len(pressure)):
+                                    Ers_A.append(E)
+                                    Rrs_A.append(R)
+                                P.extend(pressure)
+                                Q.extend(flow)
+                                PEEP_A.append(round(PEEP,1))
+                                PIP_A.append(round(PIP,1))
+                                TV_A.append(round(TidalVolume*1000))
+                                DP_A.append(round(PIP-PEEP,1))
+                        pressure, flow = [], [] # reset temp list
+                    else:
+                        section = line.split(',')
+                        try:
+                            p_split = float(section[1])
+                            q_split = float(section[0])
+                            pressure.append(round(p_split,1))
+                            flow.append(round(q_split,1))
+                        except:
+                            pass
+                
+                # get prediction
+                b_type = self._get_prediction(path,b_count)
+
+                # Split into half
+                middle_index = b_count//2
+
+                # First half    
+                dObj = {
+                    'p_no': p_no,
+                    'date': date,
+                    'hour': hour,
+                    'Ers': Ers_A[:middle_index],
+                    'Rrs': Rrs_A[:middle_index],
+                    'PEEP': PEEP_A[:middle_index],
+                    'PIP': PIP_A[:middle_index],
+                    'TV': TV_A[:middle_index],
+                    'DP': DP_A[:middle_index],
+                    'b_type': b_type[:middle_index],
+                    'b_cnt': b_count
+                }
+                sum_results.append(dObj)
+
+                # Second half    
+                hour_half = f'{hour.split("-")[0]}-30-00' # 01-30-00
+
+                dObj = {
+                    'p_no': p_no,
+                    'date': date,
+                    'hour': hour_half,
+                    'Ers': Ers_A[middle_index:],
+                    'Rrs': Rrs_A[middle_index:],
+                    'PEEP': PEEP_A[middle_index:],
+                    'PIP': PIP_A[middle_index:],
+                    'TV': TV_A[middle_index:],
+                    'DP': DP_A[middle_index:],
+                    'b_type': b_type[middle_index:],
+                    'b_cnt': b_count-middle_index
+                }
+
+                sum_results.append(dObj)
+                
+        else:
+            for f in self.fname:
+                dObj = self.fun(f)
+                sum_results.append(dObj)
         self.handle_result(sum_results)
 
 
@@ -86,18 +166,15 @@ class PostProcessor(QtCore.QObject):
     def fun(self,arg):
         self.update_subpbar.emit(10,f"Processing file {arg}")
         path = self.dirSelected + '/' + arg
-        p_no = arg.replace('.txt','').split('_')[1]
-        date = arg.replace('.txt','').split('_')[2]
-        hour = arg.replace('.txt','').split('_')[-1]
+        _, p_no, date, hour = arg.replace('.txt','').split('_')
         try:
-            Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
+            Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
         except:
             logger.info(f'Calculating results... {arg}')
             self.update_subpbar.emit(20,f"Calculating results... {arg}")
             f = open(path, "r")
-            pressure, flow = [], []
-            P, Q, Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
-            b_type = []
+            pressure, flow, b_type = [], [], []
+            P, Q, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
             b_count = 0
             for line in f:
                 if ("BS," in line) == True:
@@ -108,8 +185,8 @@ class PostProcessor(QtCore.QObject):
                         E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
                         if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
                             for i in range(len(pressure)):
-                                Ers.append(E)
-                                Rrs.append(R)
+                                Ers_A.append(E)
+                                Rrs_A.append(R)
                             P.extend(pressure)
                             Q.extend(flow)
                             PEEP_A.append(round(PEEP,1))
@@ -129,14 +206,14 @@ class PostProcessor(QtCore.QObject):
             logger.info('Calculation completed')
             self.update_subpbar.emit(30,f"Calculation completed... {arg}")
             b_type = self._get_prediction(path,b_count)
-            self.saveDb(P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
+            self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
             
         dObj = {
             'p_no': p_no,
             'date': date,
             'hour': hour,
-            'Ers': Ers,
-            'Rrs': Rrs,
+            'Ers': Ers_A,
+            'Rrs': Rrs_A,
             'PEEP': PEEP_A,
             'PIP': PIP_A,
             'TV': TV_A,
@@ -291,15 +368,15 @@ class PostProcessor(QtCore.QObject):
         logger.info('PostProcessor.handle_result(): task finished')
         r_dialy = self.combine_allday_breath(r_hourly)
         self.populate_table(r_dialy)
-        self.results.emit(r_dialy)
         self.ui.btn_PO_export.setEnabled(True)
+        self.processResMulti.emit(r_dialy)
         self.hide_pbar.emit()
         self.finished.emit()
 
-    def combine_allday_breath(self,r_hourly):
-        sum_hour, sum_Ers, sum_Rrs, sum_PEEP, sum_PIP, sum_TV, sum_DP, sum_BC, sum_FBC, sum_AI = [],[],[],[],[],[],[],[],[],[]
-        E, R, PEEP_A, PIP_A, TV_A, DP_A, AI_A = [],[],[],[],[],[],[]
-        for arg in r_hourly:
+    def combine_allday_breath(self,dObj):
+        sum_hour, sum_Ers, sum_Rrs, sum_PEEP, sum_PIP, sum_TV, sum_DP, sum_BC, sum_AI = [],[],[],[],[],[],[],[],[]
+        E, R, PEEP_A, PIP_A, TV_A, DP_A = [],[],[],[],[],[]
+        for arg in dObj:
             sum_hour.append(arg['hour'])
             sum_Ers.append(arg['Ers'])
             sum_Rrs.append(arg['Rrs'])
@@ -307,8 +384,9 @@ class PostProcessor(QtCore.QObject):
             sum_PIP.append(arg['PIP'])
             sum_TV.append(arg['TV'])
             sum_DP.append(arg['DP'])
-            sum_AI.append(arg['b_type'])
             sum_BC.append(arg['b_cnt'])
+            sum_AI.append(arg['b_type'])
+
             E.extend(arg['Ers'])
             R.extend(arg['Rrs'])
             PEEP_A.extend(arg['PEEP'])
@@ -316,8 +394,8 @@ class PostProcessor(QtCore.QObject):
             TV_A.extend(arg['TV'])
             DP_A.extend(arg['DP'])
         result = {
-            'p_no': r_hourly[0]['p_no'],
-            'date': r_hourly[0]['date'],
+            'p_no': dObj[0]['p_no'],
+            'date': dObj[0]['date'],
             'hours': sum_hour,
             'b_cnt': sum(sum_BC),
             'Ers': {},
@@ -338,7 +416,9 @@ class PostProcessor(QtCore.QObject):
             result[params[i]]['min'] = min(paramsVal[i])
             result[params[i]]['max'] = max(paramsVal[i])
             result[params[i]]['raw'] = paramsRaw[i]
-        result['TV']['q5'],result['TV']['q25'],result['TV']['q50'],result['TV']['q75'],result['TV']['q95'] = result['TV']['q5'].astype(int) ,result['TV']['q25'].astype(int) ,result['TV']['q50'].astype(int) ,result['TV']['q75'].astype(int) ,result['TV']['q95'].astype(int)
+        for j in ['q5','q25','q50','q75','q95']:
+            result['TV'][j] = result['TV'][j].astype(int)     
+        # result['TV']['q5'],result['TV']['q25'],result['TV']['q50'],result['TV']['q75'],result['TV']['q95'] = result['TV']['q5'].astype(int) ,result['TV']['q25'].astype(int) ,result['TV']['q50'].astype(int) ,result['TV']['q75'].astype(int) ,result['TV']['q95'].astype(int)
         
         return result
 

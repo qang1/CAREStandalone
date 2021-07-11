@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
             self.postP.hide_pbar.connect(self._hideStackedPbar)
             self.postP.update_subpbar.connect(self._updateStackedPbar)
             self.postP.update_mainpbar.connect(self._updateMainStackedPbar)
-            self.postP.results.connect(self._processRes)
+            self.postP.processResMulti.connect(self._processRes)
             self.postP.finished.connect(self.postP_thread.quit)
             self.ui.btn_startBatchPros.setEnabled(False)
         else:
@@ -145,12 +145,10 @@ class MainWindow(QMainWindow):
         self.ui.poPEEPWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
         self.ui.poVtWidget.canvas.ax.set_ylabel('ml')
         self.ui.poDpWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
-        self.ui.poErsWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poRrsWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poPIPWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poPEEPWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poVtWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poDpWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        plots = [self.ui.poErsWidget.canvas.ax,self.ui.poRrsWidget.canvas.ax,self.ui.poPIPWidget.canvas.ax,self.ui.poPEEPWidget.canvas.ax,self.ui.poVtWidget.canvas.ax,self.ui.poDpWidget.canvas.ax]
+        for i in range(len(plots)):
+            plots[i].set_xlabel('Hour (24-hour notation)')
+        
         self.ui.poErsWidget.canvas.ax.boxplot(res['Ers']['raw'],labels=xaxis, showfliers=False)
         self.ui.poRrsWidget.canvas.ax.boxplot(res['Rrs']['raw'],labels=xaxis, showfliers=False)
         self.ui.poPIPWidget.canvas.ax.boxplot(res['PIP']['raw'],labels=xaxis, showfliers=False)
