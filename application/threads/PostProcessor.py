@@ -1,11 +1,12 @@
 # Standard library imports
 from multiprocessing.pool import ThreadPool
+import statistics
 import time
 import json
 import os
 
 # Third party imports
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, QSettings
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtSql import  QSqlQuery
 import numpy as np
@@ -35,6 +36,7 @@ class PostProcessor(QtCore.QObject):
         self.ui = ui
         self.total = len(fname)
         self.cnt = 0
+        self.settings = QSettings()
 
     def run(self):
         sum_results = []
@@ -43,7 +45,9 @@ class PostProcessor(QtCore.QObject):
         # Uncomment below to use threading (Not working correctly currently)
         # pool = ThreadPool(2)
         # pool.map_async(self.fun, self.fname, callback=self.handle_result)
-        chopHalf = True
+        chopHalf = self.settings.value('resolution') == '30mins'
+        logging.info(f'Plot resolution (30mins): {chopHalf}')
+        # chopHalf = True
         if chopHalf == True:
             for f in self.fname:
                 _, p_no, date, hour = f.replace('.txt','').split('_')
@@ -364,16 +368,30 @@ class PostProcessor(QtCore.QObject):
         else:
             logger.error("Error: ", query.lastError().text())
 
-    def handle_result(self,r_hourly):
+    def handle_result(self,sum_results):
+        """Handles post processing of results after calculation
+
+        Args:
+            sum_results ([type]): [description]
+        """
         logger.info('PostProcessor.handle_result(): task finished')
-        r_dialy = self.combine_allday_breath(r_hourly)
-        self.populate_table(r_dialy)
-        self.ui.btn_PO_export.setEnabled(True)
-        self.processResMulti.emit(r_dialy)
-        self.hide_pbar.emit()
-        self.finished.emit()
+        r_dialy = self.combine_allday_breath(sum_results)
+        self.populate_table(r_dialy)            # Populate results summary table
+        self.plotBox(r_dialy)                   # Plot boxplot of resp mechanics
+        self.plotAIBar(r_dialy)                 # Plot barchart of Asynchrony analysis
+        self.processResMulti.emit(r_dialy)      # Send signal to mainwindow to update UI
+        self.hide_pbar.emit()                   # Hide progress bar
+        self.finished.emit()                    # End thread
 
     def combine_allday_breath(self,dObj):
+        """Combine multiple hours into all day list
+
+        Args:
+            dObj ([type]): [description]
+
+        Returns:
+            [type]: [description]
+        """
         sum_hour, sum_Ers, sum_Rrs, sum_PEEP, sum_PIP, sum_TV, sum_DP, sum_BC, sum_AI = [],[],[],[],[],[],[],[],[]
         E, R, PEEP_A, PIP_A, TV_A, DP_A = [],[],[],[],[],[]
         for arg in dObj:
@@ -423,6 +441,11 @@ class PostProcessor(QtCore.QObject):
         return result
 
     def populate_table(self,r_dialy):
+        """Populate results summary table
+
+        Args:
+            r_dialy ([type]): [description]
+        """
         params = ['Ers','Rrs','PEEP','PIP','TV','DP']
         font = QtGui.QFont()
         font.setPointSize(12)
@@ -446,42 +469,56 @@ class PostProcessor(QtCore.QObject):
             item.setText(str(r_dialy[params[i]]['q95']))
             self.ui.tableWidget_2.setItem(2, i, item)
         
+    def plotBox(self,res):
+        """Plot boxplot of resp mechanics
+
+        Args:
+            res ([type]): [description]
+        """
+        # define lists for mpl plots
+        plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
+            self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas]
+        y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$']
+        xaxis = [res['hours'][i][0:5] for i in range(len(res['hours']))]
+        params = ['Ers','Rrs','PEEP','PIP','TV','DP']
+
+        # setup and draw plots in for loop
+        for i in range(len(plots)):
+            plots[i].ax.set_xlabel('Hour (24-hour notation)')
+            plots[i].ax.set_ylabel(y_labels[i])
+            plots[i].ax.boxplot(res[params[i]]['raw'],labels=xaxis, showfliers=False)
+            plots[i].ax.set_xticklabels(xaxis, rotation = 45)
+            plots[i].draw()
+
+        for i in range(len(plots)):
+            plots[i].fig.set_size_inches(14,4)
+            plots[i].fig.savefig(f'exports/{params[i]}.png', dpi=300)
 
 
-    # def fetchDbData(self):
-    #     sum_hour, sum_Ers, sum_Rrs, sum_PEEP, sum_PIP, sum_TV, sum_DP, sum_BC, sum_FBC, sum_AI = [],[],[],[],[],[],[],[],[],[]
-    #     fname = self.fname[0].replace('.txt','')
-    #     p_no = str(fname.split('_')[1])
-    #     date = str(fname.split('_')[2])
-    #     hour = str(fname.split('_')[3])
-    #     query = QSqlQuery(f"""SELECT hour, Ers_raw, Rrs_raw, b_count, b_type,
-    #                     PEEP_raw, PIP_raw, TV_raw, DP_raw  FROM results 
-    #                     WHERE p_no='{p_no}' AND date='{date}';
-    #                     """)
-    #     query.exec_()
+
+    def plotAIBar(self,res):
+        """Plot barchart of Asynchrony analysis
+
+        Args:
+            res ([type]): [description]
+        """
+        xaxis = [res['hours'][i][0:5] for i in range(len(res['hours']))]
+        b_types = res['b_type']
+        Asyn, Norm, Asyn_perc, Norm_perc, Total = [],[],[],[],[]
+        for b in b_types:
+            Asyn.append(b.count('Asyn'))
+            Norm.append(b.count('Normal'))
+            Total.append(b.count('Asyn')+b.count('Normal'))
+            Asyn_perc.append(b.count('Asyn')/(b.count('Asyn')+b.count('Normal'))*100)
+            Norm_perc.append(b.count('Normal')/(b.count('Asyn')+b.count('Normal'))*100)
+        self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
         
-    #     while query.next():
-    #         sum_hour.append(query.value(0))
-    #         sum_Ers.append(json.loads(query.value(1)))
-    #         sum_Rrs.append(json.loads(query.value(2)))
-    #         sum_BC.append(query.value(3))
-    #         sum_AI.append(json.loads(query.value(4)))
-    #         sum_PEEP.append(json.loads(query.value(5)))
-    #         sum_PIP.append(json.loads(query.value(6)))
-    #         sum_TV.append(json.loads(query.value(7)))
-    #         sum_DP.append(json.loads(query.value(8)))
-    #     result = {
-    #         'p_no': p_no,
-    #         'date': date,
-    #         'b_cnt': sum(sum_BC),
-    #         'b_type': sum_AI,
-    #         'hours': sum_hour,
-    #         'Ers': sum_Ers,
-    #         'Rrs': sum_Rrs,
-    #         'PEEP': sum_PEEP,
-    #         'PIP': sum_PIP,
-    #         'TV': sum_TV,
-    #         'DP': sum_TV
-    #     }
-    #     print("DB entry retrieved successful")
-    #     return result
+        self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Norm_perc, width=0.35, label='Normal')
+        self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
+        self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
+        self.ui.poAIWidget.canvas.ax.legend()
+        self.ui.poAIWidget.canvas.draw()
+        self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
+        self.ui.poAIWidget.canvas.fig.savefig(f'exports/AI.png', dpi=300)
+

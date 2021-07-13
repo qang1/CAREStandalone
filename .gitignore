@@ -1,6 +1,7 @@
 application/__pycache__
 application/build
 application/dist
+application/exports
 *.logs
 
 

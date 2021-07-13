@@ -6,7 +6,6 @@ Returns:
 
 # Standard library imports
 from os.path import isfile, join
-import statistics
 import csv
 import os
 import logging
@@ -34,10 +33,11 @@ class MainWindow(QMainWindow):
         super(MainWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        self.settings = QtCore.QSettings()
-        keys = self.settings.allKeys()
-
-        print(keys)
+        self.about = AboutDialog(self)
+        self.setsDlg = SettingsDialog(self)
+        self.settings = self.setsDlg.settings
+        # keys = self.settings.allKeys()
+        # print(keys)
         self._connectSignals()
         self.db = db
         self._setTableHeader()
@@ -115,72 +115,24 @@ class MainWindow(QMainWindow):
                     QMessageBox.Cancel)
 
     def _processRes(self,res):
-        logger.info('_processRes(): Processing completed.')
         # update ui 
-        self.ui.btn_PO_reset.setEnabled(True)
+        logger.info('_processRes(): Processing completed.')
         self.ui.statusBar.showMessage("Processing completed.")
-        try:
-            self.ui.label_PO_p_no.setText(res['p_no'])
-            self.ui.label_PO_date.setText(res['date'])
-            self.ui.label_t_hours.setText(str(len(res['hours'])))
-            self.ui.label_PO_bCount.setText(str(res['b_cnt']))
-        except Exception as e:
-            logger.error('_processRes Error: ',e)
+        self.ui.btn_PO_reset.setEnabled(True)
+        self.ui.btn_PO_export.setEnabled(True)
+        self.ui.label_PO_p_no.setText(res['p_no'])
+        self.ui.label_PO_date.setText(res['date'])
+        if self.settings.value('resolution') == '30mins':
+            hours_cnt = int(len(res['hours'])/2)
+        else:
+            hours_cnt = int(len(res['hours']))
+        self.ui.label_t_hours.setText(str(hours_cnt))
+        self.ui.label_PO_bCount.setText(str(res['b_cnt']))
 
-        xaxis = []
-        for i in range(len(res['hours'])):
-            xaxis.append(res['hours'][i][0:5])
-
-        params = ['Ers','Rrs','PEEP','PIP','TV','DP']
-        font = QtGui.QFont()
-        font.setPointSize(12)
-        
-
+        # resize table widget (can't be done on thread for some reasons)
         self.ui.tableWidget_2.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.ui.tableWidget_2.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
 
-        self.ui.poErsWidget.canvas.ax.set_ylabel(r'$cmH_2O/l$')
-        self.ui.poRrsWidget.canvas.ax.set_ylabel(r'$cmH_2Os/l$')
-        self.ui.poPIPWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
-        self.ui.poPEEPWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
-        self.ui.poVtWidget.canvas.ax.set_ylabel('ml')
-        self.ui.poDpWidget.canvas.ax.set_ylabel(r'$cmH_2O$')
-        plots = [self.ui.poErsWidget.canvas.ax,self.ui.poRrsWidget.canvas.ax,self.ui.poPIPWidget.canvas.ax,self.ui.poPEEPWidget.canvas.ax,self.ui.poVtWidget.canvas.ax,self.ui.poDpWidget.canvas.ax]
-        for i in range(len(plots)):
-            plots[i].set_xlabel('Hour (24-hour notation)')
-        
-        self.ui.poErsWidget.canvas.ax.boxplot(res['Ers']['raw'],labels=xaxis, showfliers=False)
-        self.ui.poRrsWidget.canvas.ax.boxplot(res['Rrs']['raw'],labels=xaxis, showfliers=False)
-        self.ui.poPIPWidget.canvas.ax.boxplot(res['PIP']['raw'],labels=xaxis, showfliers=False)
-        self.ui.poPEEPWidget.canvas.ax.boxplot(res['PEEP']['raw'],labels=xaxis, showfliers=False)
-        self.ui.poVtWidget.canvas.ax.boxplot(res['TV']['raw'],labels=xaxis, showfliers=False)
-        self.ui.poDpWidget.canvas.ax.boxplot(res['DP']['raw'],labels=xaxis, showfliers=False)
-        self.ui.poErsWidget.canvas.draw()
-        self.ui.poRrsWidget.canvas.draw()
-        self.ui.poPIPWidget.canvas.draw()
-        self.ui.poPEEPWidget.canvas.draw()
-        self.ui.poVtWidget.canvas.draw()
-        self.ui.poDpWidget.canvas.draw()
-
-        b_types = res['b_type']
-        Asyn, Norm, Asyn_perc, Norm_perc, Total = [],[],[],[],[]
-        for b in b_types:
-            Asyn.append(b.count('Asyn'))
-            Norm.append(b.count('Normal'))
-            Total.append(b.count('Asyn')+b.count('Normal'))
-            Asyn_perc.append(b.count('Asyn')/(b.count('Asyn')+b.count('Normal'))*100)
-            Norm_perc.append(b.count('Normal')/(b.count('Asyn')+b.count('Normal'))*100)
-        self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
-        
-        labels = xaxis
-        width = 0.35
-        self.ui.poAIWidget.canvas.ax.bar(labels,Norm_perc, width, label='Normal')
-        self.ui.poAIWidget.canvas.ax.bar(labels,Asyn_perc, width, bottom=Norm_perc, label='Asynchrony')
-        self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
-        self.ui.poAIWidget.canvas.ax.legend()
-        self.ui.poAIWidget.canvas.draw()
-        # self.ui.ai_breath_label.setText(str(AIndex))
 
     def _listFileDetails(self,fullFileName):
         fname = fullFileName.split('/')[-1].replace('.txt','')
@@ -218,20 +170,13 @@ class MainWindow(QMainWindow):
         self.ui.ai_breath_label.setText('')
 
     def _resetPO(self):
-        self.ui.poErsWidget.canvas.ax.cla()
-        self.ui.poRrsWidget.canvas.ax.cla()
-        self.ui.poPIPWidget.canvas.ax.cla()
-        self.ui.poPEEPWidget.canvas.ax.cla()
-        self.ui.poVtWidget.canvas.ax.cla()
-        self.ui.poDpWidget.canvas.ax.cla()
-        self.ui.poAIWidget.canvas.ax.cla()
-        self.ui.poErsWidget.canvas.draw()
-        self.ui.poRrsWidget.canvas.draw()
-        self.ui.poPIPWidget.canvas.draw()
-        self.ui.poPEEPWidget.canvas.draw()
-        self.ui.poVtWidget.canvas.draw()
-        self.ui.poDpWidget.canvas.draw()
-        self.ui.poAIWidget.canvas.draw()
+        # Clear plots
+        plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
+            self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,self.ui.poAIWidget.canvas]
+        for i in range(len(plots)):
+            plots[i].ax.cla()
+            plots[i].draw()
+     
         self.ui.label_PO_p_no.setText('')
         self.ui.label_PO_date.setText('')
         self.ui.label_t_hours.setText('')
@@ -244,19 +189,12 @@ class MainWindow(QMainWindow):
         self.ui.btn_PO_export.setEnabled(False)
         self.ui.btn_PO_reset.setEnabled(False)
 
-    def showAbout(self):
-        self.about = AboutDialog(self)
-        self.about.show()
-
-    def showSettings(self):
-        self.settings = SettingsDialog(self)
-        self.settings.show()
         
     def _connectSignals(self):
         """Connect signals and slots."""
         # Action tab
-        self.ui.actionAbout.triggered.connect(self.showAbout)
-        self.ui.actionSettings.triggered.connect(self.showSettings)
+        self.ui.actionAbout.triggered.connect(self.about.show)
+        self.ui.actionSettings.triggered.connect(self.setsDlg.show)
 
         # First tab
         self.ui.btn_start.clicked.connect(self._openExampleFile)
@@ -268,6 +206,7 @@ class MainWindow(QMainWindow):
         self.ui.btn_startBatchPros.clicked.connect(self._startBatchPros)
         self.ui.btn_PO_reset.clicked.connect(self._resetPO)
         self.ui.btn_PO_export.clicked.connect(self._exportPO)
+
 
     def _exportPO(self):
         files = [f for f in os.listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
@@ -439,6 +378,10 @@ class MainWindow(QMainWindow):
             print('qthread stopped')
         else:
             print('worker has already exited.')
+
+
+
+
 
 
 
