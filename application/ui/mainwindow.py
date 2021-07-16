@@ -215,7 +215,7 @@ class MainWindow(QMainWindow):
         fname = first_file.replace('.txt','')
         p_no = str(fname.split('_')[1])
         date = str(fname.split('_')[2])
-        name, _ = QFileDialog.getSaveFileName(self, 'Save File', '',"Comma Seperated values (*.csv)")
+        name, _ = QFileDialog.getSaveFileName(self, 'Save File', f'{self.dirSelected}/{date}',"Comma Seperated values (*.csv)")
         logger.info(f'User selected export csv filename: {name}')
         if name != "":
             query = QSqlQuery(self.db)
@@ -225,7 +225,8 @@ class MainWindow(QMainWindow):
                             PEEP_min,  PEEP_max, PEEP_q5, PEEP_q25, PEEP_q50, PEEP_q75, PEEP_q95,
                             PIP_min,   PIP_max,  PIP_q5,  PIP_q25,  PIP_q50,  PIP_q75,  PIP_q95,
                             TV_min,    TV_max,   TV_q5,   TV_q25,   TV_q50,   TV_q75,   TV_q95,
-                            DP_min,    DP_max,   DP_q5,   DP_q25,   DP_q50,   DP_q75,   DP_q95  FROM results
+                            DP_min,    DP_max,   DP_q5,   DP_q25,   DP_q50,   DP_q75,   DP_q95,
+                            AI_Norm_cnt, AI_Asyn_cnt, AI_Index  FROM results
                             WHERE p_no='{p_no}' AND date='{date}';
                             """)
                 
@@ -240,12 +241,13 @@ class MainWindow(QMainWindow):
                         'PEEP_min', 'PEEP_max','PEEP_q5','PEEP_q25','PEEP_q50','PEEP_q75','PEEP_q95',
                         'PIP_min', 'PIP_max','PIP_q5','PIP_q25','PIP_q50','PIP_q75','PIP_q95',
                         'TV_min', 'TV_max','TV_q5','TV_q25','TV_q50','TV_q75','TV_q95',
-                        'DP_min', 'DP_max','DP_q5','DP_q25','DP_q50','DP_q75','DP_q95'
+                        'DP_min', 'DP_max','DP_q5','DP_q25','DP_q50','DP_q75','DP_q95',
+                        'AI_Norm_cnt', 'AI_Asyn_cnt', 'AI_index'
                         ))
                     while query.next():
                         # Write file
                         listsTmpData = []
-                        for column in range(46):
+                        for column in range(49):
                             listsTmpData.append(str(query.value(column)))
                         w.writerow(listsTmpData)
                 # Notify user export done
@@ -260,13 +262,13 @@ class MainWindow(QMainWindow):
                 QMessageBox.Cancel)
 
     def _exportRes(self):
-        name, _ = QFileDialog.getSaveFileName(self, 'Save File', '',"Comma Seperated values (*.csv)")
+        fname = self.fname.replace('.txt','')
+        p_no = str(fname.split('_')[1])
+        date = str(fname.split('_')[2])
+        hour = str(fname.split('_')[3])
+        name, _ = QFileDialog.getSaveFileName(self, 'Save File', date,"Comma Seperated values (*.csv)")
         logger.info(f'User selected export csv filename: {name}')
         if name != "":
-            fname = self.fname.replace('.txt','')
-            p_no = str(fname.split('_')[1])
-            date = str(fname.split('_')[2])
-            hour = str(fname.split('_')[3])
             query = QSqlQuery(self.db)
             query.exec(f"""SELECT p_no, date, hour, b_count,
                             Ers_min,   Ers_max,  Ers_q5,  Ers_q25,  Ers_q50,  Ers_q75,  Ers_q95,

@@ -49,43 +49,50 @@ class PostProcessor(QtCore.QObject):
         logging.info(f'Plot resolution (30mins): {chopHalf}')
         # chopHalf = True
         if chopHalf == True:
-            for f in self.fname:
-                _, p_no, date, hour = f.replace('.txt','').split('_')
-                path = f'{self.dirSelected}/{f}'
+            for arg in self.fname:
+                _, p_no, date, hour = arg.replace('.txt','').split('_')
+                path = f'{self.dirSelected}/{arg}'
                 f = open(path, "r")
                 pressure, flow, b_type = [], [], []
                 P, Q, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
                 b_count = 0
-                for line in f:
-                    if ("BS," in line) == True:
-                        pass
-                    elif ("BE" in line) == True:
-                        b_count += 1
-                        if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
-                            E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
-                            if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
-                                for i in range(len(pressure)):
-                                    Ers_A.append(E)
-                                    Rrs_A.append(R)
-                                P.extend(pressure)
-                                Q.extend(flow)
-                                PEEP_A.append(round(PEEP,1))
-                                PIP_A.append(round(PIP,1))
-                                TV_A.append(round(TidalVolume*1000))
-                                DP_A.append(round(PIP-PEEP,1))
-                        pressure, flow = [], [] # reset temp list
-                    else:
-                        section = line.split(',')
-                        try:
-                            p_split = float(section[1])
-                            q_split = float(section[0])
-                            pressure.append(round(p_split,1))
-                            flow.append(round(q_split,1))
-                        except:
+                try:
+                    Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
+                except:
+                    for line in f:
+                        if ("BS," in line) == True:
                             pass
-                
-                # get prediction
-                b_type = self._get_prediction(path,b_count)
+                        elif ("BE" in line) == True:
+                            b_count += 1
+                            if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
+                                E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
+                                if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
+                                    for i in range(len(pressure)):
+                                        Ers_A.append(E)
+                                        Rrs_A.append(R)
+                                    P.extend(pressure)
+                                    Q.extend(flow)
+                                    PEEP_A.append(round(PEEP,1))
+                                    PIP_A.append(round(PIP,1))
+                                    TV_A.append(round(TidalVolume*1000))
+                                    DP_A.append(round(PIP-PEEP,1))
+                            pressure, flow = [], [] # reset temp list
+                        else:
+                            section = line.split(',')
+                            try:
+                                p_split = float(section[1])
+                                q_split = float(section[0])
+                                pressure.append(round(p_split,1))
+                                flow.append(round(q_split,1))
+                            except:
+                                pass
+                    
+                    # get prediction
+                    b_type = self._get_prediction(path,b_count)
+
+                    # Save results into db
+                    self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
+
 
                 # Split into half
                 middle_index = b_count//2
@@ -124,6 +131,7 @@ class PostProcessor(QtCore.QObject):
                 }
 
                 sum_results.append(dObj)
+                self.updateStatus()
                 
         else:
             for f in self.fname:
@@ -281,7 +289,12 @@ class PostProcessor(QtCore.QObject):
         PIP_raw = json.dumps(PIP_A)
         TV_raw = json.dumps(TV_A)
         DP_raw = json.dumps(DP_A)
+
+        Norm_cnt = b_type.count('Normal')
+        Asyn_cnt = b_type.count('Asyn')
+        AI_index = round(Asyn_cnt/(Asyn_cnt+Norm_cnt)*100,2)
         b_type = json.dumps(b_type)
+
         query = QSqlQuery(self.db)
         query.prepare(f"""INSERT INTO results (p_no, date, hour, p, q, b_count, b_type,
                         Ers_raw, Rrs_raw, PEEP_raw, PIP_raw, TV_raw, DP_raw,
@@ -291,7 +304,8 @@ class PostProcessor(QtCore.QObject):
                         Ers_q75, Rrs_q75, PEEP_q75, PIP_q75, TV_q75, DP_q75,
                         Ers_q95, Rrs_q95, PEEP_q95, PIP_q95, TV_q95, DP_q95,
                         Ers_min, Rrs_min, PEEP_min, PIP_min, TV_min, DP_min,
-                        Ers_max, Rrs_max, PEEP_max, PIP_max, TV_max, DP_max) 
+                        Ers_max, Rrs_max, PEEP_max, PIP_max, TV_max, DP_max,
+                        AI_Norm_cnt, AI_Asyn_cnt, AI_Index) 
                         VALUES (:p_no, :date, :hour, :p, :q, :b_count, :b_type,
                         :Ers_raw, :Rrs_raw, :PEEP_raw, :PIP_raw, :TV_raw, :DP_raw, 
                         :Ers_q5,  :Rrs_q5,  :PEEP_q5,  :PIP_q5,  :TV_q5,  :DP_q5,
@@ -300,7 +314,8 @@ class PostProcessor(QtCore.QObject):
                         :Ers_q75, :Rrs_q75, :PEEP_q75, :PIP_q75, :TV_q75, :DP_q75,
                         :Ers_q95, :Rrs_q95, :PEEP_q95, :PIP_q95, :TV_q95, :DP_q95,
                         :Ers_min, :Rrs_min, :PEEP_min, :PIP_min, :TV_min, :DP_min,
-                        :Ers_max, :Rrs_max, :PEEP_max, :PIP_max, :TV_max, :DP_max)""")
+                        :Ers_max, :Rrs_max, :PEEP_max, :PIP_max, :TV_max, :DP_max,
+                        :AI_Norm_cnt, :AI_Asyn_cnt, :AI_Index)""")
         query.bindValue(":p_no", p_no)
         query.bindValue(":date", date)
         query.bindValue(":hour", hour)
@@ -363,10 +378,14 @@ class PostProcessor(QtCore.QObject):
         query.bindValue(":PIP_max", dObj['PIP']['max'])
         query.bindValue(":TV_max", dObj['TV']['max'])
         query.bindValue(":DP_max", dObj['DP']['max'])
+
+        query.bindValue(":AI_Norm_cnt", Norm_cnt)
+        query.bindValue(":AI_Asyn_cnt", Asyn_cnt)
+        query.bindValue(":AI_Index", AI_index)
         if query.exec_():
             logger.info("DB entry query successful")
         else:
-            logger.error("Error: ", query.lastError().text())
+            logger.error(f"Error: {query.lastError().text()}")
 
     def handle_result(self,sum_results):
         """Handles post processing of results after calculation
@@ -479,20 +498,25 @@ class PostProcessor(QtCore.QObject):
         plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
             self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas]
         y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$']
-        xaxis = [res['hours'][i][0:5] for i in range(len(res['hours']))]
+        xaxis = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
         params = ['Ers','Rrs','PEEP','PIP','TV','DP']
+
+        if len(xaxis) > 10:
+            rot_angle = 45
+        else:
+            rot_angle = 0
 
         # setup and draw plots in for loop
         for i in range(len(plots)):
             plots[i].ax.set_xlabel('Hour (24-hour notation)')
             plots[i].ax.set_ylabel(y_labels[i])
             plots[i].ax.boxplot(res[params[i]]['raw'],labels=xaxis, showfliers=False)
-            plots[i].ax.set_xticklabels(xaxis, rotation = 45)
+            plots[i].ax.set_xticklabels(xaxis, rotation = rot_angle)
             plots[i].draw()
 
         for i in range(len(plots)):
             plots[i].fig.set_size_inches(14,4)
-            plots[i].fig.savefig(f'exports/{params[i]}.png', dpi=300)
+            plots[i].fig.savefig(f'{self.dirSelected}/{params[i]}.png', dpi=300)
 
 
 
@@ -509,16 +533,26 @@ class PostProcessor(QtCore.QObject):
             Asyn.append(b.count('Asyn'))
             Norm.append(b.count('Normal'))
             Total.append(b.count('Asyn')+b.count('Normal'))
-            Asyn_perc.append(b.count('Asyn')/(b.count('Asyn')+b.count('Normal'))*100)
-            Norm_perc.append(b.count('Normal')/(b.count('Asyn')+b.count('Normal'))*100)
+            try:
+                Asyn_perc.append(b.count('Asyn')/(b.count('Asyn')+b.count('Normal'))*100)
+                Norm_perc.append(b.count('Normal')/(b.count('Asyn')+b.count('Normal'))*100)
+            except:
+                Asyn_perc.append(0)
+                Norm_perc.append(0)
         self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
+
+        if len(xaxis) > 10:
+            rot_angle = 45
+        else:
+            rot_angle = 0
         
         self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Norm_perc, width=0.35, label='Normal')
         self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
         self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
         self.ui.poAIWidget.canvas.ax.legend()
+        self.ui.poAIWidget.canvas.ax.set_xticklabels(xaxis, rotation = rot_angle)
         self.ui.poAIWidget.canvas.draw()
         self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
-        self.ui.poAIWidget.canvas.fig.savefig(f'exports/AI.png', dpi=300)
+        self.ui.poAIWidget.canvas.fig.savefig(f'{self.dirSelected}/AI.png', dpi=300)
 

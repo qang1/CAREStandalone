@@ -83,9 +83,9 @@ def createTable(db):
             DP_max REAL,
 
             --AI data
-            AI_Norm_cnt REAL,
-            AI_Asyn_cnt REAL,
-            AI_Nois_cnt REAL,
+            AI_Norm_cnt INTEGER,
+            AI_Asyn_cnt INTEGER,
+            AI_Nois_cnt INTEGER,
             AI_Index REAL
             
         )
