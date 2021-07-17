@@ -172,7 +172,8 @@ class MainWindow(QMainWindow):
     def _resetPO(self):
         # Clear plots
         plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
-            self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,self.ui.poAIWidget.canvas]
+                self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
+                self.ui.poAIWidget.canvas,self.ui.poAMWidget.canvas]
         for i in range(len(plots)):
             plots[i].ax.cla()
             plots[i].draw()

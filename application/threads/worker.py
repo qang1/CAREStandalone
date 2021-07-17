@@ -12,7 +12,7 @@ import numpy as np
 
 # Local application imports
 from calculations import Elastance, _calcQuartiles
-from utils.AI import get_current_model, predict
+from utils.AI import get_current_model, AIpredict
 
 from matplotlib.dates import DateFormatter
 from datetime import datetime, timedelta
@@ -51,7 +51,7 @@ class Worker(QtCore.QObject):
                 self.update_pbar.emit(progress,'Predicting breath ...')
             elif ("BE" in line) == True:
                 if len(pressure) != 0:
-                    b_type.append(predict(pressure, self.PClassiModel))
+                    b_type.append(AIpredict(pressure, self.PClassiModel))
                 pressure = [] # reset pressure list
             else:
                 if line != '': # Filter out empty lines

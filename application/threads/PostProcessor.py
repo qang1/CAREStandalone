@@ -15,7 +15,7 @@ from keras import backend as K
 
 # Local application imports
 from calculations import Elastance, _calcQuartiles
-from utils.AI import get_current_model, predict
+from utils.AI import get_current_model, AIpredict, load_Recon_Model, recon
 
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
@@ -180,7 +180,8 @@ class PostProcessor(QtCore.QObject):
         path = self.dirSelected + '/' + arg
         _, p_no, date, hour = arg.replace('.txt','').split('_')
         try:
-            Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
+            # Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
+            1/0
         except:
             logger.info(f'Calculating results... {arg}')
             self.update_subpbar.emit(20,f"Calculating results... {arg}")
@@ -218,7 +219,8 @@ class PostProcessor(QtCore.QObject):
             logger.info('Calculation completed')
             self.update_subpbar.emit(30,f"Calculation completed... {arg}")
             b_type = self._get_prediction(path,b_count)
-            self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
+            AImag = self._get_recon(path,b_count)
+            # self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
             
         dObj = {
             'p_no': p_no,
@@ -231,7 +233,8 @@ class PostProcessor(QtCore.QObject):
             'TV': TV_A,
             'DP': DP_A,
             'b_type': b_type,
-            'b_cnt': b_count
+            'b_cnt': b_count,
+            'AImag': AImag
         }
 
         self.updateStatus()
@@ -239,7 +242,6 @@ class PostProcessor(QtCore.QObject):
         return dObj
 
    
-
     def _get_prediction(self,path,b_count):
         b_type, pressure = [], []
         now_count = 0
@@ -259,7 +261,7 @@ class PostProcessor(QtCore.QObject):
                     self.update_subpbar.emit(progress,'Predicting breath ...')
                 elif ("BE" in line) == True:
                     if len(pressure) != 0:
-                        b_type.append(predict(pressure, self.PClassiModel))
+                        b_type.append(AIpredict(pressure, self.PClassiModel))
                     pressure = [] # reset pressure list
                 else:
                     section = line.split(',')
@@ -273,7 +275,38 @@ class PostProcessor(QtCore.QObject):
             logger.error(f'{e}')
         return b_type
 
-    
+    def _get_recon(self,path,b_count):
+        magAI, pressure, flow = [], [], []
+        now_count = 0
+
+        logger.info(f'Loading recon model...{path}')
+        self.update_subpbar.emit(40,f'Loading recon model...{path}')
+        K.clear_session()
+        self.reconModel = load_Recon_Model()
+        logger.info(f'Starting breath recon ...{path}')
+        self.update_subpbar.emit(40,f'Starting breath recon ...{path}')
+        f = open(path, "r")
+        for line in f:
+            if ("BS," in line) == True:
+                now_count += 1
+                progress = int((now_count/b_count)*100)
+                self.update_subpbar.emit(progress,'REcon breath ...')
+            elif ("BE" in line) == True:
+                if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
+                    magAI.append(recon(flow,pressure, self.reconModel))
+                pressure = [] # reset pressure list
+                flow = []
+            else:
+                section = line.split(',')
+                try:
+                    p_split = float(section[1])
+                    q_split = float(section[0])
+                    pressure.append(round(p_split,1))
+                    flow.append(round(q_split,1))
+                except:
+                    pass
+        logger.info('Breath prediction completed.')
+        return magAI
 
     def saveDb(self, P, Q, E, R, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg):
         fname = arg.replace('.txt','')
@@ -406,12 +439,12 @@ class PostProcessor(QtCore.QObject):
         """Combine multiple hours into all day list
 
         Args:
-            dObj ([type]): [description]
+            dObj (list): [description]
 
         Returns:
-            [type]: [description]
+            result [dict]: [description]
         """
-        sum_hour, sum_Ers, sum_Rrs, sum_PEEP, sum_PIP, sum_TV, sum_DP, sum_BC, sum_AI = [],[],[],[],[],[],[],[],[]
+        sum_hour, sum_Ers, sum_Rrs, sum_PEEP, sum_PIP, sum_TV, sum_DP, sum_BC, sum_AI, sum_mag = [],[],[],[],[],[],[],[],[],[]
         E, R, PEEP_A, PIP_A, TV_A, DP_A = [],[],[],[],[],[]
         for arg in dObj:
             sum_hour.append(arg['hour'])
@@ -423,6 +456,7 @@ class PostProcessor(QtCore.QObject):
             sum_DP.append(arg['DP'])
             sum_BC.append(arg['b_cnt'])
             sum_AI.append(arg['b_type'])
+            sum_mag.append(arg['AImag'])
 
             E.extend(arg['Ers'])
             R.extend(arg['Rrs'])
@@ -430,6 +464,7 @@ class PostProcessor(QtCore.QObject):
             PIP_A.extend(arg['PIP'])
             TV_A.extend(arg['TV'])
             DP_A.extend(arg['DP'])
+
         result = {
             'p_no': dObj[0]['p_no'],
             'date': dObj[0]['date'],
@@ -441,7 +476,8 @@ class PostProcessor(QtCore.QObject):
             'PIP': {},
             'TV': {},
             'DP': {},
-            'b_type': sum_AI
+            'b_type': sum_AI,
+            'AImag': {'raw':sum_mag}
         }
         
         params = ['Ers','Rrs','PEEP','PIP','TV','DP']
@@ -496,10 +532,11 @@ class PostProcessor(QtCore.QObject):
         """
         # define lists for mpl plots
         plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
-            self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas]
-        y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$']
+                self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
+                self.ui.poAMWidget.canvas]
+        y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$','%']
         xaxis = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
-        params = ['Ers','Rrs','PEEP','PIP','TV','DP']
+        params = ['Ers','Rrs','PEEP','PIP','TV','DP','AImag']
 
         if len(xaxis) > 10:
             rot_angle = 45
@@ -517,8 +554,6 @@ class PostProcessor(QtCore.QObject):
         for i in range(len(plots)):
             plots[i].fig.set_size_inches(14,4)
             plots[i].fig.savefig(f'{self.dirSelected}/{params[i]}.png', dpi=300)
-
-
 
     def plotAIBar(self,res):
         """Plot barchart of Asynchrony analysis
@@ -555,4 +590,6 @@ class PostProcessor(QtCore.QObject):
         self.ui.poAIWidget.canvas.draw()
         self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
         self.ui.poAIWidget.canvas.fig.savefig(f'{self.dirSelected}/AI.png', dpi=300)
+
+
 
