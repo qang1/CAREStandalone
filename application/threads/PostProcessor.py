@@ -137,6 +137,8 @@ class PostProcessor(QtCore.QObject):
             for f in self.fname:
                 dObj = self.fun(f)
                 sum_results.append(dObj)
+            sum_results = self._get_prediction(sum_results)
+            sum_results = self._get_recon(sum_results)
         self.handle_result(sum_results)
 
 
@@ -188,6 +190,7 @@ class PostProcessor(QtCore.QObject):
             f = open(path, "r")
             pressure, flow, b_type = [], [], []
             P, Q, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
+            P_A, Q_A = [], []
             b_count = 0
             for line in f:
                 if ("BS," in line) == True:
@@ -202,6 +205,8 @@ class PostProcessor(QtCore.QObject):
                                 Rrs_A.append(R)
                             P.extend(pressure)
                             Q.extend(flow)
+                            P_A.append(pressure)
+                            Q_A.append(flow)
                             PEEP_A.append(round(PEEP,1))
                             PIP_A.append(round(PIP,1))
                             TV_A.append(round(TidalVolume*1000))
@@ -218,23 +223,21 @@ class PostProcessor(QtCore.QObject):
                         pass
             logger.info('Calculation completed')
             self.update_subpbar.emit(30,f"Calculation completed... {arg}")
-            b_type = self._get_prediction(path,b_count)
-            AImag = self._get_recon(path,b_count)
             # self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
             
         dObj = {
             'p_no': p_no,
             'date': date,
             'hour': hour,
+            'pressure': P_A,
+            'flow': Q_A,
             'Ers': Ers_A,
             'Rrs': Rrs_A,
             'PEEP': PEEP_A,
             'PIP': PIP_A,
             'TV': TV_A,
             'DP': DP_A,
-            'b_type': b_type,
-            'b_cnt': b_count,
-            'AImag': AImag
+            'b_cnt': b_count
         }
 
         self.updateStatus()
@@ -242,71 +245,51 @@ class PostProcessor(QtCore.QObject):
         return dObj
 
    
-    def _get_prediction(self,path,b_count):
+    def _get_prediction(self,sum_results):
         b_type, pressure = [], []
         now_count = 0
-
-        logger.info(f'Loading model...{path}')
-        self.update_subpbar.emit(40,f'Loading model...{path}')
-        K.clear_session()
+        logger.info(f'Loading model...')
+        self.update_subpbar.emit(40,f'Loading model...')
         model_name, self.PClassiModel = get_current_model()
-        logger.info(f'Starting breath prediction...{path}')
-        self.update_subpbar.emit(40,f'Starting breath prediction...{path}')
-        try:
-            f = open(path, "r")
-            for line in f:
-                if ("BS," in line) == True:
-                    now_count += 1
-                    progress = int((now_count/b_count)*100)
-                    self.update_subpbar.emit(progress,'Predicting breath ...')
-                elif ("BE" in line) == True:
-                    if len(pressure) != 0:
-                        b_type.append(AIpredict(pressure, self.PClassiModel))
-                    pressure = [] # reset pressure list
-                else:
-                    section = line.split(',')
-                    try:
-                        p_split = float(section[1])
-                        pressure.append(round(p_split,1))
-                    except:
-                        pass
+
+        for dObj in sum_results:
+            # K.clear_session()
+            logger.info(f'Starting breath prediction...{dObj["hour"]}')
+            self.update_subpbar.emit(40,f'Starting breath prediction...{dObj["hour"]}')
+
+            # now_count += 1
+            # progress = int((now_count/b_count)*100)
+            # self.update_subpbar.emit(progress,'Predicting breath ...')
+            for p in dObj["pressure"]:
+                b_type.append(AIpredict(p, self.PClassiModel))
+            dObj["b_type"] = b_type
+                    
             logger.info('Breath prediction completed.')
-        except Exception as e:
-            logger.error(f'{e}')
-        return b_type
+        # except Exception as e:
+            # logger.error(f'{e}')
+        return sum_results
 
-    def _get_recon(self,path,b_count):
-        magAI, pressure, flow = [], [], []
-        now_count = 0
+    def _get_recon(self,sum_results):
+        AImag= []
 
-        logger.info(f'Loading recon model...{path}')
-        self.update_subpbar.emit(40,f'Loading recon model...{path}')
-        K.clear_session()
-        self.reconModel = load_Recon_Model()
-        logger.info(f'Starting breath recon ...{path}')
-        self.update_subpbar.emit(40,f'Starting breath recon ...{path}')
-        f = open(path, "r")
-        for line in f:
-            if ("BS," in line) == True:
-                now_count += 1
-                progress = int((now_count/b_count)*100)
-                self.update_subpbar.emit(progress,'REcon breath ...')
-            elif ("BE" in line) == True:
-                if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
-                    magAI.append(recon(flow,pressure, self.reconModel))
-                pressure = [] # reset pressure list
-                flow = []
-            else:
-                section = line.split(',')
-                try:
-                    p_split = float(section[1])
-                    q_split = float(section[0])
-                    pressure.append(round(p_split,1))
-                    flow.append(round(q_split,1))
-                except:
-                    pass
-        logger.info('Breath prediction completed.')
-        return magAI
+        logger.info(f'Loading recon model...')
+        self.update_subpbar.emit(50,f'Loading recon model...')
+        # K.clear_session()
+        reconModel = load_Recon_Model()
+
+        for dObj in sum_results:
+
+            logger.info(f'Starting breath recon ...{dObj["hour"]}')
+            self.update_subpbar.emit(60,f'Starting breath recon ...{dObj["hour"]}')
+
+            for idx, p in enumerate(dObj["pressure"]):
+                flow = dObj["pressure"][idx]
+                AImag.append(recon(flow, p, reconModel))
+            dObj["AImag"] = AImag
+            
+        logger.info('Breath recon prediction completed.')
+        self.update_subpbar.emit(70,f'Breath recon prediction completed.')
+        return sum_results
 
     def saveDb(self, P, Q, E, R, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg):
         fname = arg.replace('.txt','')
@@ -491,7 +474,7 @@ class PostProcessor(QtCore.QObject):
             result[params[i]]['raw'] = paramsRaw[i]
         for j in ['q5','q25','q50','q75','q95']:
             result['TV'][j] = result['TV'][j].astype(int)     
-        # result['TV']['q5'],result['TV']['q25'],result['TV']['q50'],result['TV']['q75'],result['TV']['q95'] = result['TV']['q5'].astype(int) ,result['TV']['q25'].astype(int) ,result['TV']['q50'].astype(int) ,result['TV']['q75'].astype(int) ,result['TV']['q95'].astype(int)
+        
         
         return result
 
@@ -585,7 +568,7 @@ class PostProcessor(QtCore.QObject):
         self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
         self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
-        self.ui.poAIWidget.canvas.ax.legend()
+        self.ui.poAIWidget.canvas.ax.legend(loc=1)
         self.ui.poAIWidget.canvas.ax.set_xticklabels(xaxis, rotation = rot_angle)
         self.ui.poAIWidget.canvas.draw()
         self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
