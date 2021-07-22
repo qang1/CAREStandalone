@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
         self.ui.setupUi(self)
         self.about = AboutDialog(self)
         self.setsDlg = SettingsDialog(self)
+        self.pbar = PopUpProgressBar(self)
         self.settings = self.setsDlg.settings
         # keys = self.settings.allKeys()
         # print(keys)
@@ -127,7 +128,7 @@ class MainWindow(QMainWindow):
         else:
             hours_cnt = int(len(res['hours']))
         self.ui.label_t_hours.setText(str(hours_cnt))
-        self.ui.label_PO_bCount.setText(str(res['b_cnt']))
+        self.ui.label_PO_bCount.setText(str(res['b_count']))
 
         # resize table widget (can't be done on thread for some reasons)
         self.ui.tableWidget_2.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -186,7 +187,7 @@ class MainWindow(QMainWindow):
         self.ui.lineEdit_dir.setText('')
         self.ui.tableWidget_2.clearContents()
         self.ui.statusBar.showMessage("Screen refreshed")
-        self.ui.btn_startBatchPros.setEnabled(True)
+        # self.ui.btn_startBatchPros.setEnabled(True)
         self.ui.btn_PO_export.setEnabled(False)
         self.ui.btn_PO_reset.setEnabled(False)
 
@@ -216,7 +217,8 @@ class MainWindow(QMainWindow):
         fname = first_file.replace('.txt','')
         p_no = str(fname.split('_')[1])
         date = str(fname.split('_')[2])
-        name, _ = QFileDialog.getSaveFileName(self, 'Save File', f'{self.dirSelected}/{date}',"Comma Seperated values (*.csv)")
+        # name, _ = QFileDialog.getSaveFileName(self, 'Save File', f'{self.dirSelected}/{date}',"Comma Seperated values (*.csv)")
+        name = f'{self.dirSelected}/{date}.csv'
         logger.info(f'User selected export csv filename: {name}')
         if name != "":
             query = QSqlQuery(self.db)
@@ -253,9 +255,9 @@ class MainWindow(QMainWindow):
                         w.writerow(listsTmpData)
                 # Notify user export done
                 self.ui.statusBar.showMessage("Data exported to: "+ name )
-                QMessageBox.information(None, ("Data exported"),
-                                    ("Data exported to: \n"+ name),
-                        QMessageBox.Ok)
+                # QMessageBox.information(None, ("Data exported"),
+                #                     ("Data exported to: \n"+ name),
+                #         QMessageBox.Ok)
             except PermissionError as e:
                 # Notify user export failed
                 QMessageBox.warning(None, ("Cannot write file"),
@@ -329,7 +331,6 @@ class MainWindow(QMainWindow):
         self.pbar.hide()
         
     def _openPbar(self):
-        self.pbar = PopUpProgressBar(self)
         self.pbar.show()
 
     def _updatePbar(self,value,text):

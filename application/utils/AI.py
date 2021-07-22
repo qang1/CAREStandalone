@@ -114,6 +114,7 @@ def recon(flow,temp_pressure,ReconModel):
     normalized_AB = temp.reshape(64,)/max_recon
     VI = 1 - (abs(trapz(reconstructed) - trapz(normalized_AB)))/trapz(reconstructed) # VI metric
     magAB = (abs(trapz(reconstructed) - trapz(normalized_AB)))/trapz(reconstructed) *100 #Magnitude of AB
+    magAB = np.around(magAB,2)
     # print(f': {magAB}')
 
     # plt.figure()

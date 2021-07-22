@@ -7,12 +7,14 @@ import matplotlib
 # Ensure using PyQt5 backend
 matplotlib.use('QT5Agg')
 
-# Matplotlib canvas class to create figure
+"""
+    Data History line plot chart widget
+"""
 class MplCanvas(Canvas):
     def __init__(self):
         self.fig = Figure()
         self.ax = self.fig.add_subplot(111)
-        self.fig.subplots_adjust(left=0.03, right=0.975, top=1.0, bottom=0.090)
+        self.fig.subplots_adjust(left=0.05, right=0.975, top=1.0, bottom=0.090)
         Canvas.__init__(self, self.fig)
         Canvas.setSizePolicy(self, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         Canvas.updateGeometry(self)
@@ -28,6 +30,9 @@ class MplWidget(QtWidgets.QWidget):
         self.vbl.addWidget(self.canvas)
         self.setLayout(self.vbl)
 
+"""
+    Data History boxplot chart widget
+"""
 class MplCanvas2(Canvas):
     def __init__(self):
         self.fig = Figure(figsize=(1, 6))
@@ -52,6 +57,9 @@ class MplWidget2(QtWidgets.QWidget):
         self.vbl.addWidget(self.canvas)
         self.setLayout(self.vbl)
 
+"""
+   Patient overview boxplot trend chart widget
+"""
 class MplCanvas3(Canvas):
     def __init__(self):
         self.fig = Figure()
@@ -89,6 +97,33 @@ class MplWidget4(QtWidgets.QWidget):
     def __init__(self, parent=None):
         QtWidgets.QWidget.__init__(self, parent)            # Inherit from QWidget
         self.canvas = MplCanvas4()                           # Create canvas object
+        self.toolbar = NavigationToolbar(self.canvas, self) # create mpl toolbar control
+        self.vbl = QtWidgets.QVBoxLayout()         # Set box for plotting
+        self.vbl.addWidget(self.toolbar)
+        self.vbl.addWidget(self.canvas)
+        self.setLayout(self.vbl)
+
+"""
+    Data History boxplot chart widget
+"""
+class MplCanvas5(Canvas):
+    def __init__(self):
+        self.fig = Figure()
+        self.ax = self.fig.add_subplot(111)
+        self.fig.subplots_adjust(top=0.88,
+                                bottom=0.11,
+                                left=0.16,
+                                right=0.9,
+                                hspace=0.2,
+                                wspace=0.2)
+        Canvas.__init__(self, self.fig)
+        Canvas.setSizePolicy(self, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        Canvas.updateGeometry(self)
+
+class MplWidget5(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        QtWidgets.QWidget.__init__(self, parent)            # Inherit from QWidget
+        self.canvas = MplCanvas5()                           # Create canvas object
         self.toolbar = NavigationToolbar(self.canvas, self) # create mpl toolbar control
         self.vbl = QtWidgets.QVBoxLayout()         # Set box for plotting
         self.vbl.addWidget(self.toolbar)

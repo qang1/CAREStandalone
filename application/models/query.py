@@ -23,6 +23,7 @@ def createTable(db):
             PIP_raw BLOB,
             TV_raw BLOB,
             DP_raw BLOB,
+            AM_raw BLOB,
             b_type BLOB,
             b_count INTEGER,
             
@@ -85,7 +86,6 @@ def createTable(db):
             --AI data
             AI_Norm_cnt INTEGER,
             AI_Asyn_cnt INTEGER,
-            AI_Nois_cnt INTEGER,
             AI_Index REAL
             
         )

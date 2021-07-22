@@ -162,7 +162,7 @@ class Ui_MainWindow(object):
         self.tab_5 = QtWidgets.QWidget()
         self.tab_5.setObjectName("tab_5")
         self.pieGraphWidget = MplWidget4(self.tab_5)
-        self.pieGraphWidget.setGeometry(QtCore.QRect(620, 10, 831, 461))
+        self.pieGraphWidget.setGeometry(QtCore.QRect(780, 10, 671, 461))
         self.pieGraphWidget.setObjectName("pieGraphWidget")
         self.label_2 = QtWidgets.QLabel(self.tab_5)
         self.label_2.setGeometry(QtCore.QRect(30, 30, 101, 21))
@@ -261,6 +261,9 @@ class Ui_MainWindow(object):
         self.line_2.setFrameShape(QtWidgets.QFrame.HLine)
         self.line_2.setFrameShadow(QtWidgets.QFrame.Sunken)
         self.line_2.setObjectName("line_2")
+        self.AMBoxWidget = MplWidget5(self.tab_5)
+        self.AMBoxWidget.setGeometry(QtCore.QRect(480, 10, 281, 461))
+        self.AMBoxWidget.setObjectName("AMBoxWidget")
         self.tabWidget_2.addTab(self.tab_5, "")
         self.groupBox_5 = QtWidgets.QGroupBox(self.tab)
         self.groupBox_5.setGeometry(QtCore.QRect(570, 10, 921, 221))
@@ -970,7 +973,7 @@ class Ui_MainWindow(object):
         self.tabWidget.addTab(self.tab_2, "")
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 1504, 21))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 1504, 26))
         self.menubar.setObjectName("menubar")
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.menuFile.setObjectName("menuFile")
@@ -996,8 +999,8 @@ class Ui_MainWindow(object):
         self.menubar.addAction(self.menuHelp.menuAction())
 
         self.retranslateUi(MainWindow)
-        self.tabWidget.setCurrentIndex(1)
-        self.tabWidget_2.setCurrentIndex(0)
+        self.tabWidget.setCurrentIndex(0)
+        self.tabWidget_2.setCurrentIndex(2)
         self.tabWidget_3.setCurrentIndex(0)
         self.actionExit.triggered.connect(MainWindow.close)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
@@ -1107,4 +1110,4 @@ class Ui_MainWindow(object):
         self.actionAbout.setText(_translate("MainWindow", "About"))
         self.actionSettings.setText(_translate("MainWindow", "Settings"))
 
-from ui.mplwidget import MplWidget, MplWidget2, MplWidget3, MplWidget4
+from ui.mplwidget import MplWidget, MplWidget2, MplWidget3, MplWidget4, MplWidget5

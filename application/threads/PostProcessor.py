@@ -39,108 +39,43 @@ class PostProcessor(QtCore.QObject):
         self.settings = QSettings()
 
     def run(self):
-        sum_results = []
         self.open_pbar.emit()
         self.updateStatus()
-        # Uncomment below to use threading (Not working correctly currently)
-        # pool = ThreadPool(2)
-        # pool.map_async(self.fun, self.fname, callback=self.handle_result)
-        chopHalf = self.settings.value('resolution') == '30mins'
-        logging.info(f'Plot resolution (30mins): {chopHalf}')
-        # chopHalf = True
-        if chopHalf == True:
-            for arg in self.fname:
-                _, p_no, date, hour = arg.replace('.txt','').split('_')
-                path = f'{self.dirSelected}/{arg}'
-                f = open(path, "r")
-                pressure, flow, b_type = [], [], []
-                P, Q, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
-                b_count = 0
-                try:
-                    Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
-                except:
-                    for line in f:
-                        if ("BS," in line) == True:
-                            pass
-                        elif ("BE" in line) == True:
-                            b_count += 1
-                            if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
-                                E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
-                                if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
-                                    for i in range(len(pressure)):
-                                        Ers_A.append(E)
-                                        Rrs_A.append(R)
-                                    P.extend(pressure)
-                                    Q.extend(flow)
-                                    PEEP_A.append(round(PEEP,1))
-                                    PIP_A.append(round(PIP,1))
-                                    TV_A.append(round(TidalVolume*1000))
-                                    DP_A.append(round(PIP-PEEP,1))
-                            pressure, flow = [], [] # reset temp list
-                        else:
-                            section = line.split(',')
-                            try:
-                                p_split = float(section[1])
-                                q_split = float(section[0])
-                                pressure.append(round(p_split,1))
-                                flow.append(round(q_split,1))
-                            except:
-                                pass
-                    
-                    # get prediction
-                    b_type = self._get_prediction(path,b_count)
-
-                    # Save results into db
-                    self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
-
-
-                # Split into half
-                middle_index = b_count//2
-
-                # First half    
-                dObj = {
-                    'p_no': p_no,
-                    'date': date,
-                    'hour': hour,
-                    'Ers': Ers_A[:middle_index],
-                    'Rrs': Rrs_A[:middle_index],
-                    'PEEP': PEEP_A[:middle_index],
-                    'PIP': PIP_A[:middle_index],
-                    'TV': TV_A[:middle_index],
-                    'DP': DP_A[:middle_index],
-                    'b_type': b_type[:middle_index],
-                    'b_cnt': b_count
-                }
+        no_results, sum_results = [], []
+        
+        # For each file in directory, fetch data from db if exists.
+        # If not, append filename to no_results list to process.
+        for f in self.fname:
+            try:
+                dObj = self.fetchDb(f)
                 sum_results.append(dObj)
+            except:
+                no_results.append(f)
 
-                # Second half    
-                hour_half = f'{hour.split("-")[0]}-30-00' # 01-30-00
-
-                dObj = {
-                    'p_no': p_no,
-                    'date': date,
-                    'hour': hour_half,
-                    'Ers': Ers_A[middle_index:],
-                    'Rrs': Rrs_A[middle_index:],
-                    'PEEP': PEEP_A[middle_index:],
-                    'PIP': PIP_A[middle_index:],
-                    'TV': TV_A[middle_index:],
-                    'DP': DP_A[middle_index:],
-                    'b_type': b_type[middle_index:],
-                    'b_cnt': b_count-middle_index
-                }
-
-                sum_results.append(dObj)
-                self.updateStatus()
-                
-        else:
-            for f in self.fname:
+        # If there is filename not exist in db, calc resp mechanics,
+        # followed by breath prediction and reconstruction. Finaly,
+        # Save results individually in db.
+        if len(no_results) != 0:
+            new_results = []
+            for f in no_results:
                 dObj = self.fun(f)
-                sum_results.append(dObj)
-            sum_results = self._get_prediction(sum_results)
-            sum_results = self._get_recon(sum_results)
-        self.handle_result(sum_results)
+                new_results.append(dObj)
+            new_results = self._get_prediction(new_results)
+            new_results = self._get_recon(new_results)
+            self.saveResults(new_results)
+            
+            # insert new results to sum results and sort by hour
+            sum_results.extend(new_results)
+            sum_results = sorted(sum_results, key=lambda k: k['hour'])
 
+        # Plot in 30 minutes to increase trend detail
+        chopHalf = self.settings.value('resolution') == '30mins'
+        if chopHalf == True:
+            logging.info(f'Plot resolution (30mins): {chopHalf}')
+            sum_results = self.calcHalf(sum_results)
+
+        # Finalize, process, and display data
+        self.handle_result(sum_results)
 
     
     def updateStatus(self):
@@ -149,12 +84,17 @@ class PostProcessor(QtCore.QObject):
         self.cnt += 1
         logger.info(f"Processing file {self.cnt}/{self.total}")
 
-    def fetchDb(self,p_no,date,hour):
-        
+    def updateBarStatus(self,cnt,total):
+        perCmpl = round(cnt/total*100,2)
+        self.update_mainpbar.emit(perCmpl,f"Total: Processing file {cnt}/{total}")
+        logger.info(f"Processing file {cnt}/{total}")
+
+    def fetchDb(self,f):
+        _, p_no, date, hour = f.replace('.txt','').split('_')
         logger.info(f'DB lookup.Params - p_no: {p_no}; date: {date}; hour: {hour}')
         query = QSqlQuery(self.db)
         query.exec(f"""SELECT p, q, Ers_raw, Rrs_raw, b_count, b_type,
-                        PEEP_raw, PIP_raw, TV_raw, DP_raw  FROM results 
+                        PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw  FROM results 
                         WHERE p_no='{p_no}' AND date='{date}' AND hour='{hour}';
                         """)
         if query.next():
@@ -170,12 +110,84 @@ class PostProcessor(QtCore.QObject):
             PIP_A = json.loads(query.value(7))
             TV_A = json.loads(query.value(8))
             DP_A = json.loads(query.value(9))
+            AM_raw = json.loads(query.value(10))
             logger.info('DB entry found. Breath count: %s', b_count)
-            return Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A
+
+            dObj = {
+                'p_no': p_no,
+                'date': date,
+                'hour': hour,
+                'Ers': Ers,
+                'Rrs': Rrs,
+                'PEEP': PEEP_A,
+                'PIP': PIP_A,
+                'TV': TV_A,
+                'DP': DP_A,
+                'b_count': b_count,
+                'b_type': b_type,
+                'AImag': AM_raw
+            }
+            return dObj
         else:
             logger.warning(f'No db found. DEBUG: query.next() false')
             logger.warning(f'{self.db.lastError().text()}')
             raise Exception
+
+    def calcHalf(self,input_results):
+        """
+        Seperates incoming dictionary of 1 hour input results
+        to 30 minutes interval. Splits half by breath count.
+            
+        *Assume there is complete number of breath in an hour.
+
+        Args:
+            input_results (list): list of dictionaries [{'01-00-00'},{02-00-00},...]
+
+        Returns:
+            sum_results: list of output results [{'01-00-00'},{01-30-00},...]
+        """
+        sum_results = []
+        for i in input_results:
+            # Split into half
+            middle_index = i['b_count']//2
+
+            # First half    
+            Firsthalf_dObj = {
+                'p_no': i['p_no'],
+                'date': i['date'],
+                'hour': i['hour'],
+                'Ers': i['Ers'][:middle_index],
+                'Rrs': i['Rrs'][:middle_index],
+                'PEEP': i['PEEP'][:middle_index],
+                'PIP': i['PIP'][:middle_index],
+                'TV': i['TV'][:middle_index],
+                'DP': i['DP'][:middle_index],
+                'b_type': i['b_type'][:middle_index],
+                'AImag': i['AImag'][:middle_index],
+                'b_count': i['b_count']
+            }
+            sum_results.append(Firsthalf_dObj)
+
+            # Second half    
+            hour_half = f'{i["hour"].split("-")[0]}-30-00' # 01-30-00
+
+            Secondhalf_dObj = {
+                'p_no': i['p_no'],
+                'date': i['date'],
+                'hour': hour_half,
+                'Ers': i['Ers'][middle_index:],
+                'Rrs': i['Rrs'][middle_index:],
+                'PEEP': i['PEEP'][middle_index:],
+                'PIP': i['PIP'][middle_index:],
+                'TV': i['TV'][middle_index:],
+                'DP': i['DP'][middle_index:],
+                'b_type': i['b_type'][middle_index:],
+                'AImag': i['AImag'][middle_index:],
+                'b_count': i['b_count']
+            }
+
+            sum_results.append(Secondhalf_dObj)
+        return sum_results
 
     def fun(self,arg):
         self.update_subpbar.emit(10,f"Processing file {arg}")
@@ -229,6 +241,8 @@ class PostProcessor(QtCore.QObject):
             'p_no': p_no,
             'date': date,
             'hour': hour,
+            'P': P,
+            'Q': Q,
             'pressure': P_A,
             'flow': Q_A,
             'Ers': Ers_A,
@@ -237,7 +251,7 @@ class PostProcessor(QtCore.QObject):
             'PIP': PIP_A,
             'TV': TV_A,
             'DP': DP_A,
-            'b_cnt': b_count
+            'b_count': b_count
         }
 
         self.updateStatus()
@@ -246,23 +260,21 @@ class PostProcessor(QtCore.QObject):
 
    
     def _get_prediction(self,sum_results):
-        b_type, pressure = [], []
-        now_count = 0
+
         logger.info(f'Loading model...')
         self.update_subpbar.emit(40,f'Loading model...')
         model_name, self.PClassiModel = get_current_model()
-
-        for dObj in sum_results:
-            # K.clear_session()
+        total_cnt = len(sum_results)
+        for cnt, dObj in enumerate(sum_results):
+            
+            b_type = []
             logger.info(f'Starting breath prediction...{dObj["hour"]}')
-            self.update_subpbar.emit(40,f'Starting breath prediction...{dObj["hour"]}')
-
-            # now_count += 1
-            # progress = int((now_count/b_count)*100)
-            # self.update_subpbar.emit(progress,'Predicting breath ...')
+            self.update_subpbar.emit(40,f'Predicting breath ...{dObj["hour"]}')
+            self.updateBarStatus(cnt,total_cnt)
+            logger.info(len(dObj["pressure"]))
             for p in dObj["pressure"]:
                 b_type.append(AIpredict(p, self.PClassiModel))
-            dObj["b_type"] = b_type
+            sum_results[cnt]["b_type"] = b_type
                     
             logger.info('Breath prediction completed.')
         # except Exception as e:
@@ -270,15 +282,15 @@ class PostProcessor(QtCore.QObject):
         return sum_results
 
     def _get_recon(self,sum_results):
-        AImag= []
 
         logger.info(f'Loading recon model...')
         self.update_subpbar.emit(50,f'Loading recon model...')
-        # K.clear_session()
         reconModel = load_Recon_Model()
+        total_cnt = len(sum_results)
 
-        for dObj in sum_results:
-
+        for cnt, dObj in enumerate(sum_results):
+            AImag = []
+            self.updateBarStatus(cnt,total_cnt)
             logger.info(f'Starting breath recon ...{dObj["hour"]}')
             self.update_subpbar.emit(60,f'Starting breath recon ...{dObj["hour"]}')
 
@@ -288,32 +300,50 @@ class PostProcessor(QtCore.QObject):
             dObj["AImag"] = AImag
             
         logger.info('Breath recon prediction completed.')
-        self.update_subpbar.emit(70,f'Breath recon prediction completed.')
+        self.update_subpbar.emit(100,f'Processing complete. Populating result...')
         return sum_results
 
-    def saveDb(self, P, Q, E, R, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg):
-        fname = arg.replace('.txt','')
-        p_no = str(fname.split('_')[1])
-        date = str(fname.split('_')[2])
-        hour = str(fname.split('_')[3])
-        dObj = _calcQuartiles(E, R, PEEP_A, PIP_A, TV_A, DP_A)
+    def saveResults(self,sum_results):
+        for results in sum_results:
+            P = results['P']
+            Q = results['Q']
+            Ers = results['Ers']
+            Rrs = results['Rrs']
+            b_count = results['b_count']
+            b_type = results['b_type']
+            PEEP = results['PEEP']
+            PIP = results['PIP']
+            TV = results['TV']
+            DP = results['DP']
+            AImag = results['AImag']
+            p_no = results['p_no']
+            date = results['date']
+            hour = results['hour']
+            self.saveDb(P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, p_no, date, hour)
+
+    def saveDb(self, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, p_no, date, hour):
+        
+        dObj = _calcQuartiles(Ers, Rrs, PEEP, PIP, TV, DP)
+
+        # Encoding python object to json
         p = json.dumps(P)
         q = json.dumps(Q)
-        e = json.dumps(E)
-        r = json.dumps(R)
-        PEEP_raw = json.dumps(PEEP_A)
-        PIP_raw = json.dumps(PIP_A)
-        TV_raw = json.dumps(TV_A)
-        DP_raw = json.dumps(DP_A)
+        Ers_raw = json.dumps(Ers)
+        Rrs_raw = json.dumps(Rrs)
+        PEEP_raw = json.dumps(PEEP)
+        PIP_raw = json.dumps(PIP)
+        TV_raw = json.dumps(TV)
+        DP_raw = json.dumps(DP)
+        AM_raw = json.dumps(AImag)
+        b_type_encoded = json.dumps(b_type)
 
         Norm_cnt = b_type.count('Normal')
         Asyn_cnt = b_type.count('Asyn')
         AI_index = round(Asyn_cnt/(Asyn_cnt+Norm_cnt)*100,2)
-        b_type = json.dumps(b_type)
 
         query = QSqlQuery(self.db)
         query.prepare(f"""INSERT INTO results (p_no, date, hour, p, q, b_count, b_type,
-                        Ers_raw, Rrs_raw, PEEP_raw, PIP_raw, TV_raw, DP_raw,
+                        Ers_raw, Rrs_raw, PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw,
                         Ers_q5,  Rrs_q5,  PEEP_q5,  PIP_q5,  TV_q5,  DP_q5,
                         Ers_q25, Rrs_q25, PEEP_q25, PIP_q25, TV_q25, DP_q25,
                         Ers_q50, Rrs_q50, PEEP_q50, PIP_q50, TV_q50, DP_q50,
@@ -323,7 +353,7 @@ class PostProcessor(QtCore.QObject):
                         Ers_max, Rrs_max, PEEP_max, PIP_max, TV_max, DP_max,
                         AI_Norm_cnt, AI_Asyn_cnt, AI_Index) 
                         VALUES (:p_no, :date, :hour, :p, :q, :b_count, :b_type,
-                        :Ers_raw, :Rrs_raw, :PEEP_raw, :PIP_raw, :TV_raw, :DP_raw, 
+                        :Ers_raw, :Rrs_raw, :PEEP_raw, :PIP_raw, :TV_raw, :DP_raw, :AM_raw,
                         :Ers_q5,  :Rrs_q5,  :PEEP_q5,  :PIP_q5,  :TV_q5,  :DP_q5,
                         :Ers_q25, :Rrs_q25, :PEEP_q25, :PIP_q25, :TV_q25, :DP_q25,
                         :Ers_q50, :Rrs_q50, :PEEP_q50, :PIP_q50, :TV_q50, :DP_q50,
@@ -338,13 +368,14 @@ class PostProcessor(QtCore.QObject):
         query.bindValue(":p", p)
         query.bindValue(":q", q)
         query.bindValue(":b_count", b_count)
-        query.bindValue(":b_type", b_type)
-        query.bindValue(":Ers_raw", e)
-        query.bindValue(":Rrs_raw", r)
+        query.bindValue(":b_type", b_type_encoded)
+        query.bindValue(":Ers_raw", Ers_raw)
+        query.bindValue(":Rrs_raw", Rrs_raw)
         query.bindValue(":PEEP_raw", PEEP_raw)
         query.bindValue(":PIP_raw", PIP_raw)
         query.bindValue(":TV_raw", TV_raw)
         query.bindValue(":DP_raw", DP_raw)
+        query.bindValue(":AM_raw", AM_raw)
         
         query.bindValue(":Ers_q5", float(dObj['Ers']['q5']))
         query.bindValue(":Rrs_q5", float(dObj['Rrs']['q5']))
@@ -437,7 +468,7 @@ class PostProcessor(QtCore.QObject):
             sum_PIP.append(arg['PIP'])
             sum_TV.append(arg['TV'])
             sum_DP.append(arg['DP'])
-            sum_BC.append(arg['b_cnt'])
+            sum_BC.append(arg['b_count'])
             sum_AI.append(arg['b_type'])
             sum_mag.append(arg['AImag'])
 
@@ -452,7 +483,7 @@ class PostProcessor(QtCore.QObject):
             'p_no': dObj[0]['p_no'],
             'date': dObj[0]['date'],
             'hours': sum_hour,
-            'b_cnt': sum(sum_BC),
+            'b_count': sum(sum_BC),
             'Ers': {},
             'Rrs': {},
             'PEEP': {},
@@ -521,7 +552,7 @@ class PostProcessor(QtCore.QObject):
         xaxis = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
         params = ['Ers','Rrs','PEEP','PIP','TV','DP','AImag']
 
-        if len(xaxis) > 10:
+        if len(xaxis) > 12:
             rot_angle = 45
         else:
             rot_angle = 0
@@ -559,20 +590,28 @@ class PostProcessor(QtCore.QObject):
                 Norm_perc.append(0)
         self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
 
-        if len(xaxis) > 10:
+        if len(xaxis) > 12:
             rot_angle = 45
         else:
             rot_angle = 0
         
         self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Norm_perc, width=0.35, label='Normal')
-        self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
+        bars = self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
         self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
+        self.ui.poAIWidget.canvas.ax.set_ylim([0,110])
         self.ui.poAIWidget.canvas.ax.legend(loc=1)
         self.ui.poAIWidget.canvas.ax.set_xticklabels(xaxis, rotation = rot_angle)
         self.ui.poAIWidget.canvas.draw()
         self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
         self.ui.poAIWidget.canvas.fig.savefig(f'{self.dirSelected}/AI.png', dpi=300)
 
+        for idx, bar in enumerate(bars):
+            self._update_annot(bar,Asyn_perc[idx])
 
+    def _update_annot(self,bar,val):
+        x = bar.get_x()+bar.get_width()/2.
+        y = bar.get_y()+bar.get_height()
+        text = "AI: {:.2g}".format( val )
+        annot = self.ui.poAIWidget.canvas.ax.annotate(text, xy=(x,y), xytext=(-20,2),textcoords="offset points")
 
