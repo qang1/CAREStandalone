@@ -26,6 +26,8 @@ def createTable(db):
             AM_raw BLOB,
             b_type BLOB,
             b_count INTEGER,
+            b_num_all BLOB,
+            b_len BLOB,
             
             --q5 reading
             Ers_q5 REAL,

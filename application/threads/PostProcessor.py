@@ -15,7 +15,7 @@ from keras import backend as K
 
 # Local application imports
 from calculations import Elastance, _calcQuartiles
-from utils.AI import get_current_model, AIpredict, load_Recon_Model, recon
+from utils.AI import get_current_model, AIpredict, load_Recon_Model, recon, saveDb
 
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ class PostProcessor(QtCore.QObject):
             sum_results = self.calcHalf(sum_results)
 
         # Finalize, process, and display data
+        self.update_subpbar.emit(100,f'Processing complete. Populating result...')
         self.handle_result(sum_results)
 
     
@@ -193,49 +194,13 @@ class PostProcessor(QtCore.QObject):
         self.update_subpbar.emit(10,f"Processing file {arg}")
         path = self.dirSelected + '/' + arg
         _, p_no, date, hour = arg.replace('.txt','').split('_')
-        try:
-            # Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A = self.fetchDb(p_no,date,hour)
-            1/0
-        except:
-            logger.info(f'Calculating results... {arg}')
-            self.update_subpbar.emit(20,f"Calculating results... {arg}")
-            f = open(path, "r")
-            pressure, flow, b_type = [], [], []
-            P, Q, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A = [], [], [], [], [], [], [], []
-            P_A, Q_A = [], []
-            b_count = 0
-            for line in f:
-                if ("BS," in line) == True:
-                    pass
-                elif ("BE" in line) == True:
-                    b_count += 1
-                    if (len(pressure) != 0) and (len(flow) != 0) and (len(pressure) >= 50) and (len(pressure) == len(flow)):
-                        E, R, PEEP, PIP, TidalVolume, _, _ = Elastance().get_r(pressure, flow, True) # calculate respiratory parameter 
-                        if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
-                            for i in range(len(pressure)):
-                                Ers_A.append(E)
-                                Rrs_A.append(R)
-                            P.extend(pressure)
-                            Q.extend(flow)
-                            P_A.append(pressure)
-                            Q_A.append(flow)
-                            PEEP_A.append(round(PEEP,1))
-                            PIP_A.append(round(PIP,1))
-                            TV_A.append(round(TidalVolume*1000))
-                            DP_A.append(round(PIP-PEEP,1))
-                    pressure, flow = [], [] # reset temp list
-                else:
-                    section = line.split(',')
-                    try:
-                        p_split = float(section[1])
-                        q_split = float(section[0])
-                        pressure.append(round(p_split,1))
-                        flow.append(round(q_split,1))
-                    except:
-                        pass
-            logger.info('Calculation completed')
-            self.update_subpbar.emit(30,f"Calculation completed... {arg}")
-            # self.saveDb(P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, arg)
+        
+        logger.info(f'Calculating results... {arg}')
+        self.update_subpbar.emit(20,f"Calculating results... {arg}")
+        P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len = Elastance().calcRespMechanics(path)
+       
+        logger.info('Calculation completed')
+        self.update_subpbar.emit(30,f"Calculation completed... {arg}")
             
         dObj = {
             'p_no': p_no,
@@ -251,7 +216,9 @@ class PostProcessor(QtCore.QObject):
             'PIP': PIP_A,
             'TV': TV_A,
             'DP': DP_A,
-            'b_count': b_count
+            'b_count': b_count,
+            'b_num_all': b_num_all,
+            'b_len': b_len
         }
 
         self.updateStatus()
@@ -297,13 +264,13 @@ class PostProcessor(QtCore.QObject):
             for idx, p in enumerate(dObj["pressure"]):
                 flow = dObj["pressure"][idx]
                 AImag.append(recon(flow, p, reconModel))
-            dObj["AImag"] = AImag
-            
+            filtered_AImag = [a for a in AImag if not np.isnan(a)]
+            dObj["AImag"] = filtered_AImag
         logger.info('Breath recon prediction completed.')
-        self.update_subpbar.emit(100,f'Processing complete. Populating result...')
         return sum_results
 
     def saveResults(self,sum_results):
+        self.update_subpbar.emit(90,f'Saving results...')
         for results in sum_results:
             P = results['P']
             Q = results['Q']
@@ -311,140 +278,29 @@ class PostProcessor(QtCore.QObject):
             Rrs = results['Rrs']
             b_count = results['b_count']
             b_type = results['b_type']
-            PEEP = results['PEEP']
-            PIP = results['PIP']
-            TV = results['TV']
-            DP = results['DP']
+            PEEP_A = results['PEEP']
+            PIP_A = results['PIP']
+            TV_A = results['TV']
+            DP_A = results['DP']
             AImag = results['AImag']
             p_no = results['p_no']
             date = results['date']
             hour = results['hour']
-            self.saveDb(P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, p_no, date, hour)
+            b_num_all = results['b_num_all']
+            b_len = results['b_len']
+            saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour)
 
-    def saveDb(self, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, p_no, date, hour):
-        
-        dObj = _calcQuartiles(Ers, Rrs, PEEP, PIP, TV, DP)
-
-        # Encoding python object to json
-        p = json.dumps(P)
-        q = json.dumps(Q)
-        Ers_raw = json.dumps(Ers)
-        Rrs_raw = json.dumps(Rrs)
-        PEEP_raw = json.dumps(PEEP)
-        PIP_raw = json.dumps(PIP)
-        TV_raw = json.dumps(TV)
-        DP_raw = json.dumps(DP)
-        AM_raw = json.dumps(AImag)
-        b_type_encoded = json.dumps(b_type)
-
-        Norm_cnt = b_type.count('Normal')
-        Asyn_cnt = b_type.count('Asyn')
-        AI_index = round(Asyn_cnt/(Asyn_cnt+Norm_cnt)*100,2)
-
-        query = QSqlQuery(self.db)
-        query.prepare(f"""INSERT INTO results (p_no, date, hour, p, q, b_count, b_type,
-                        Ers_raw, Rrs_raw, PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw,
-                        Ers_q5,  Rrs_q5,  PEEP_q5,  PIP_q5,  TV_q5,  DP_q5,
-                        Ers_q25, Rrs_q25, PEEP_q25, PIP_q25, TV_q25, DP_q25,
-                        Ers_q50, Rrs_q50, PEEP_q50, PIP_q50, TV_q50, DP_q50,
-                        Ers_q75, Rrs_q75, PEEP_q75, PIP_q75, TV_q75, DP_q75,
-                        Ers_q95, Rrs_q95, PEEP_q95, PIP_q95, TV_q95, DP_q95,
-                        Ers_min, Rrs_min, PEEP_min, PIP_min, TV_min, DP_min,
-                        Ers_max, Rrs_max, PEEP_max, PIP_max, TV_max, DP_max,
-                        AI_Norm_cnt, AI_Asyn_cnt, AI_Index) 
-                        VALUES (:p_no, :date, :hour, :p, :q, :b_count, :b_type,
-                        :Ers_raw, :Rrs_raw, :PEEP_raw, :PIP_raw, :TV_raw, :DP_raw, :AM_raw,
-                        :Ers_q5,  :Rrs_q5,  :PEEP_q5,  :PIP_q5,  :TV_q5,  :DP_q5,
-                        :Ers_q25, :Rrs_q25, :PEEP_q25, :PIP_q25, :TV_q25, :DP_q25,
-                        :Ers_q50, :Rrs_q50, :PEEP_q50, :PIP_q50, :TV_q50, :DP_q50,
-                        :Ers_q75, :Rrs_q75, :PEEP_q75, :PIP_q75, :TV_q75, :DP_q75,
-                        :Ers_q95, :Rrs_q95, :PEEP_q95, :PIP_q95, :TV_q95, :DP_q95,
-                        :Ers_min, :Rrs_min, :PEEP_min, :PIP_min, :TV_min, :DP_min,
-                        :Ers_max, :Rrs_max, :PEEP_max, :PIP_max, :TV_max, :DP_max,
-                        :AI_Norm_cnt, :AI_Asyn_cnt, :AI_Index)""")
-        query.bindValue(":p_no", p_no)
-        query.bindValue(":date", date)
-        query.bindValue(":hour", hour)
-        query.bindValue(":p", p)
-        query.bindValue(":q", q)
-        query.bindValue(":b_count", b_count)
-        query.bindValue(":b_type", b_type_encoded)
-        query.bindValue(":Ers_raw", Ers_raw)
-        query.bindValue(":Rrs_raw", Rrs_raw)
-        query.bindValue(":PEEP_raw", PEEP_raw)
-        query.bindValue(":PIP_raw", PIP_raw)
-        query.bindValue(":TV_raw", TV_raw)
-        query.bindValue(":DP_raw", DP_raw)
-        query.bindValue(":AM_raw", AM_raw)
-        
-        query.bindValue(":Ers_q5", float(dObj['Ers']['q5']))
-        query.bindValue(":Rrs_q5", float(dObj['Rrs']['q5']))
-        query.bindValue(":PEEP_q5", float(dObj['PEEP']['q5']))
-        query.bindValue(":PIP_q5", float(dObj['PIP']['q5']))
-        query.bindValue(":TV_q5", float(dObj['TV']['q5']))
-        query.bindValue(":DP_q5", float(dObj['DP']['q5']))
-
-        query.bindValue(":Ers_q25", float(dObj['Ers']['q25']))
-        query.bindValue(":Rrs_q25", float(dObj['Rrs']['q25']))
-        query.bindValue(":PEEP_q25", float(dObj['PEEP']['q25']))
-        query.bindValue(":PIP_q25", float(dObj['PIP']['q25']))
-        query.bindValue(":TV_q25", float(dObj['TV']['q25']))
-        query.bindValue(":DP_q25", float(dObj['DP']['q25']))
-        
-        query.bindValue(":Ers_q50", float(dObj['Ers']['q50']))
-        query.bindValue(":Rrs_q50", float(dObj['Rrs']['q50']))
-        query.bindValue(":PEEP_q50", float(dObj['PEEP']['q50']))
-        query.bindValue(":PIP_q50", float(dObj['PIP']['q50']))
-        query.bindValue(":TV_q50", float(dObj['TV']['q50']))
-        query.bindValue(":DP_q50", float(dObj['DP']['q50']))
-        
-        query.bindValue(":Ers_q75", float(dObj['Ers']['q75']))
-        query.bindValue(":Rrs_q75", float(dObj['Rrs']['q75']))
-        query.bindValue(":PEEP_q75", float(dObj['PEEP']['q75']))
-        query.bindValue(":PIP_q75", float(dObj['PIP']['q75']))
-        query.bindValue(":TV_q75", float(dObj['TV']['q75']))
-        query.bindValue(":DP_q75", float(dObj['DP']['q75']))
-        
-        query.bindValue(":Ers_q95", float(dObj['Ers']['q95']))
-        query.bindValue(":Rrs_q95", float(dObj['Rrs']['q95']))
-        query.bindValue(":PEEP_q95", float(dObj['PEEP']['q95']))
-        query.bindValue(":PIP_q95", float(dObj['PIP']['q95']))
-        query.bindValue(":TV_q95", float(dObj['TV']['q95']))
-        query.bindValue(":DP_q95", float(dObj['DP']['q95']))
-        
-        query.bindValue(":Ers_min", float(dObj['Ers']['min']))
-        query.bindValue(":Rrs_min", float(dObj['Rrs']['min']))
-        query.bindValue(":PEEP_min", dObj['PEEP']['min'])
-        query.bindValue(":PIP_min", dObj['PIP']['min'])
-        query.bindValue(":TV_min", dObj['TV']['min'])
-        query.bindValue(":DP_min", dObj['DP']['min'])
-        
-        query.bindValue(":Ers_max", float(dObj['Ers']['max']))
-        query.bindValue(":Rrs_max", float(dObj['Rrs']['max']))
-        query.bindValue(":PEEP_max", dObj['PEEP']['max'])
-        query.bindValue(":PIP_max", dObj['PIP']['max'])
-        query.bindValue(":TV_max", dObj['TV']['max'])
-        query.bindValue(":DP_max", dObj['DP']['max'])
-
-        query.bindValue(":AI_Norm_cnt", Norm_cnt)
-        query.bindValue(":AI_Asyn_cnt", Asyn_cnt)
-        query.bindValue(":AI_Index", AI_index)
-        if query.exec_():
-            logger.info("DB entry query successful")
-        else:
-            logger.error(f"Error: {query.lastError().text()}")
 
     def handle_result(self,sum_results):
-        """Handles post processing of results after calculation
-
-        Args:
-            sum_results ([type]): [description]
+        """
+        "" Handles post processing of results after calculation
         """
         logger.info('PostProcessor.handle_result(): task finished')
         r_dialy = self.combine_allday_breath(sum_results)
         self.populate_table(r_dialy)            # Populate results summary table
         self.plotBox(r_dialy)                   # Plot boxplot of resp mechanics
         self.plotAIBar(r_dialy)                 # Plot barchart of Asynchrony analysis
+        self.plotMasyn2(r_dialy)                 # Plot barchart of Asynchrony analysis
         self.processResMulti.emit(r_dialy)      # Send signal to mainwindow to update UI
         self.hide_pbar.emit()                   # Hide progress bar
         self.finished.emit()                    # End thread
@@ -483,7 +339,7 @@ class PostProcessor(QtCore.QObject):
             'p_no': dObj[0]['p_no'],
             'date': dObj[0]['date'],
             'hours': sum_hour,
-            'b_count': sum(sum_BC),
+            'b_count': sum_BC,
             'Ers': {},
             'Rrs': {},
             'PEEP': {},
@@ -539,26 +395,27 @@ class PostProcessor(QtCore.QObject):
             self.ui.tableWidget_2.setItem(2, i, item)
         
     def plotBox(self,res):
-        """Plot boxplot of resp mechanics
-
-        Args:
-            res ([type]): [description]
+        """
+        "" Plot boxplot of resp mechanics
         """
         # define lists for mpl plots
-        plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
-                self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
+        plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPEEPWidget.canvas,
+                self.ui.poPIPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
                 self.ui.poAMWidget.canvas]
         y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$','%']
         xaxis = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
         params = ['Ers','Rrs','PEEP','PIP','TV','DP','AImag']
+        titles = [r'Elastance ($E_{rs}$)',r'Resistance ($R_{rs}$)','Positive End-Expiratory Pressure (PEEP)','Peak Inspiratory Pressure (PIP)',
+                r'Tidal Volume ($V_t$)','PIP-PEEP',r'Asynchrony Magnitude ($M_{asyn}$)']
 
-        if len(xaxis) > 12:
+        if len(xaxis) > 14:
             rot_angle = 45
         else:
             rot_angle = 0
 
         # setup and draw plots in for loop
         for i in range(len(plots)):
+            plots[i].ax.set_title(titles[i])
             plots[i].ax.set_xlabel('Hour (24-hour notation)')
             plots[i].ax.set_ylabel(y_labels[i])
             plots[i].ax.boxplot(res[params[i]]['raw'],labels=xaxis, showfliers=False)
@@ -570,10 +427,8 @@ class PostProcessor(QtCore.QObject):
             plots[i].fig.savefig(f'{self.dirSelected}/{params[i]}.png', dpi=300)
 
     def plotAIBar(self,res):
-        """Plot barchart of Asynchrony analysis
-
-        Args:
-            res ([type]): [description]
+        """
+        "" Plot barchart of Asynchrony analysis
         """
         xaxis = [res['hours'][i][0:5] for i in range(len(res['hours']))]
         b_types = res['b_type']
@@ -590,13 +445,14 @@ class PostProcessor(QtCore.QObject):
                 Norm_perc.append(0)
         self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
 
-        if len(xaxis) > 12:
+        if len(xaxis) > 14:
             rot_angle = 45
         else:
             rot_angle = 0
         
         self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Norm_perc, width=0.35, label='Normal')
         bars = self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
+        self.ui.poAIWidget.canvas.ax.set_title('Asynchrony Index Trend')
         self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
         self.ui.poAIWidget.canvas.ax.set_ylim([0,110])
@@ -615,3 +471,39 @@ class PostProcessor(QtCore.QObject):
         text = "AI: {:.2g}".format( val )
         annot = self.ui.poAIWidget.canvas.ax.annotate(text, xy=(x,y), xytext=(-20,2),textcoords="offset points")
 
+    def plotMasyn2(self,res):
+        x = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
+        
+        Masyn = [sum(res['AImag']['raw'][i])/res['b_count'][i] for i in range(len(res['hours']))]
+        Masyn_Asyn = []
+        for i in range(len(res['hours'])):
+            AImag = res['AImag']['raw'][i]
+            AI = res['b_type'][i]
+            Masyn_Asyn.append([AImag[m] for m in range(len(AImag)) if AI[m] == 'Asyn'])
+
+        Masyn3 = [sum(Masyn_Asyn[i])/res['b_count'][i] for i in range(len(res['hours']))]
+        self.ui.poAMWidget_2.canvas.ax.set_title('Average Asynchrony Magnitude in an hour')
+        self.ui.poAMWidget_2.canvas.ax.plot(x,Masyn, marker='x', mec = 'r', label=r'$\sum M_{asyn,All}$')
+        self.ui.poAMWidget_2.canvas.ax.plot(x,Masyn3, marker='o', mec = 'g', label=r'$\sum M_{asyn,AB}$')
+        self.ui.poAMWidget_2.canvas.ax.legend(loc=1)
+        self.ui.poAMWidget_2.canvas.fig.set_size_inches(14,4)
+        self.ui.poAMWidget_2.canvas.fig.savefig(f'{self.dirSelected}/Masyn_avg.png', dpi=300)
+
+        Masyn_AB = [Masyn_Asyn[i] for i in range(len(res['hours']))]
+        self.plotMasyn4(x, Masyn_AB)
+
+    def plotMasyn4(self, x, Masyn_AB):
+        
+        if len(x) > 14:
+            rot_angle = 45
+        else:
+            rot_angle = 0
+        
+        self.ui.poAMWidget_3.canvas.ax.set_title(r'Asynchrony Magnitude (AB) ($M_{asyn,AB}$)')
+        self.ui.poAMWidget_3.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poAMWidget_3.canvas.ax.set_ylabel('%')
+        self.ui.poAMWidget_3.canvas.ax.boxplot(Masyn_AB, labels=x, showfliers=False)
+        self.ui.poAMWidget_3.canvas.ax.set_xticklabels(x, rotation = rot_angle)
+        self.ui.poAMWidget_3.canvas.draw()
+        self.ui.poAMWidget_3.canvas.fig.set_size_inches(14,4)
+        self.ui.poAMWidget_3.canvas.fig.savefig(f'{self.dirSelected}/Masyn_AB.png', dpi=300)

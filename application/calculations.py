@@ -11,6 +11,66 @@ import math
 
 class Elastance():
 
+
+    def calcRespMechanics(self,path):
+        """Responsible for opening text file, extracting breath number,
+            splitting pressure and flow data, data filtering, and combine
+            all metrics together.
+
+        Args:
+            path (string): file path
+
+        Returns:
+            P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all
+        """
+        pressure, flow, b_num_all, b_len, b_check = [], [], [], [], []
+        P, Q, Ers_A, Rrs_A, P_A, Q_A, PEEP_A, PIP_A, TV_A, DP_A = [],[],[],[],[],[],[],[],[],[]
+        b_count = 0
+        with open(path, "r") as f:
+            for line in f:
+                if ("BS," in line) == True:
+                    b_num = self._extractBNum(line)
+                elif ("BE" in line) == True:
+                    if (len(pressure) >= 50) and (len(pressure) == len(flow)):
+                        E, R, PEEP, PIP, TidalVolume, _, _ = self.get_r(pressure, flow, True) # calculate respiratory parameter 
+                    
+                        if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
+                            b_count += 1
+                            b_len.append(len(pressure))
+                            Ers_A.append(E)
+                            Rrs_A.append(R)
+                            P.extend(pressure)
+                            Q.extend(flow)
+                            P_A.append(pressure)
+                            Q_A.append(flow)
+                            PEEP_A.append(round(PEEP,1))
+                            PIP_A.append(round(PIP,1))
+                            TV_A.append(round(TidalVolume*1000))
+                            DP_A.append(round(PIP-PEEP,1))
+                            b_num_all.append(b_num)
+                        else:
+                            pass
+                    else:
+                        pass
+                    pressure, flow = [], [] # reset temp list
+                else:
+                    if line != '': # Filter out empty lines
+                        section = line.split(',') # 2.34, 5.78 -> ['2.34','5.78']
+                        try:
+                            p_split = float(section[1])
+                            q_split = float(section[0])
+                                
+                            if abs(p_split) <= 100 and abs(q_split) <= 1000:
+                                if len(pressure) > 1:
+                                    if abs(p_split-pressure[-1]) <= 50 and abs(q_split-flow[-1]) <= 50:
+                                        pressure.append(round(p_split,1))
+                                        flow.append(round(q_split,1))
+                                else:
+                                    pressure.append(round(p_split,1))
+                                    flow.append(round(q_split,1))
+                        except:
+                            pass
+        return P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len
     
     def _get_V(self,Q):
         b_points = np.size(Q)
@@ -113,6 +173,20 @@ class Elastance():
 
         return Ers, Rrs, PEEP_non_array, PIP, TidalVolume, IE, VE
 
+    def _extractBNum(self,line):
+        # Gets current breath number for debug, Returns 0000 when failed.
+        try:
+            b_num = [int(s) for s in line.replace(',\n','').split(':') if s.isdigit()][0]
+        except:
+            try:
+                b_num = [int(s) for s in line.replace(',\r\n','').split(':') if s.isdigit()][0]
+            except:
+                try:
+                    b_num = [int(s) for s in line.replace(',','').split(':') if s.isdigit()][0]
+                except:
+                    b_num = 0000
+        return b_num
+
 def _calcQuartiles(E, R, PEEP_A, PIP_A, TV_A, DP_A):
     """ Calc quartiles """
     TV_A = [int(x) for x in TV_A]
@@ -135,3 +209,6 @@ def _calcQuartiles(E, R, PEEP_A, PIP_A, TV_A, DP_A):
     # dObj['TV']['q5'],dObj['TV']['q25'],dObj['TV']['q50'],dObj['TV']['q75'],dObj['TV']['q95'] = dObj['TV']['q5'].astype(int) ,dObj['TV']['q25'].astype(int) ,dObj['TV']['q50'].astype(int) ,dObj['TV']['q75'].astype(int) ,dObj['TV']['q95'].astype(int)
     
     return dObj
+
+
+

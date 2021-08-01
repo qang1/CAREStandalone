@@ -19,6 +19,11 @@ class PopUpProgressBar(QWidget):
             Qt.CustomizeWindowHint |
             Qt.WindowTitleHint
             )
+        self.setWindowTitle('Loading')
+        width = 550
+        height = 100
+        self.setMinimumSize(width, height)
+
         self.pbar.setGeometry(30, 40, 500, 75)
         self.pbarlabel = QLabel(self)
         self.pbarlabel.setGeometry(30, 40, 500, 75)
@@ -30,8 +35,6 @@ class PopUpProgressBar(QWidget):
         self.layout.addWidget(self.pbarlabel)
         self.layout.addWidget(self.pbar)
         self.setLayout(self.layout)
-        self.setGeometry(300, 300, 550, 100)
-        self.setWindowTitle('Loading')
 
     def show_pbar(self):  # To restart the progress every time
         self.show()

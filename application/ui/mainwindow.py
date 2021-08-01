@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
         else:
             hours_cnt = int(len(res['hours']))
         self.ui.label_t_hours.setText(str(hours_cnt))
-        self.ui.label_PO_bCount.setText(str(res['b_count']))
+        self.ui.label_PO_bCount.setText(str(sum(res['b_count'])))
 
         # resize table widget (can't be done on thread for some reasons)
         self.ui.tableWidget_2.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -172,9 +172,10 @@ class MainWindow(QMainWindow):
 
     def _resetPO(self):
         # Clear plots
-        plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPIPWidget.canvas,
-                self.ui.poPEEPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
-                self.ui.poAIWidget.canvas,self.ui.poAMWidget.canvas]
+        plots = [self.ui.poErsWidget.canvas, self.ui.poRrsWidget.canvas, self.ui.poPIPWidget.canvas,
+                self.ui.poPEEPWidget.canvas, self.ui.poVtWidget.canvas, self.ui.poDpWidget.canvas,
+                self.ui.poAIWidget.canvas, self.ui.poAMWidget.canvas, self.ui.poAMWidget_2.canvas,
+                self.ui.poAMWidget_3.canvas]
         for i in range(len(plots)):
             plots[i].ax.cla()
             plots[i].draw()
@@ -334,7 +335,7 @@ class MainWindow(QMainWindow):
         self.pbar.show()
 
     def _updatePbar(self,value,text):
-        logger.info(f'Pbar: {value},{text}')
+        # logger.info(f'Pbar: {value},{text}')
         self.pbar.on_count_changed(value)
         self.pbar.on_text_changed(text)
 
