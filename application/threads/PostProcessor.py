@@ -197,7 +197,7 @@ class PostProcessor(QtCore.QObject):
         
         logger.info(f'Calculating results... {arg}')
         self.update_subpbar.emit(20,f"Calculating results... {arg}")
-        P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len = Elastance().calcRespMechanics(path)
+        P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len, debug = Elastance().calcRespMechanics(path)
        
         logger.info('Calculation completed')
         self.update_subpbar.emit(30,f"Calculation completed... {arg}")
@@ -218,7 +218,8 @@ class PostProcessor(QtCore.QObject):
             'DP': DP_A,
             'b_count': b_count,
             'b_num_all': b_num_all,
-            'b_len': b_len
+            'b_len': b_len,
+            'debug': debug
         }
 
         self.updateStatus()
@@ -240,12 +241,13 @@ class PostProcessor(QtCore.QObject):
             self.updateBarStatus(cnt,total_cnt)
             logger.info(len(dObj["pressure"]))
             for p in dObj["pressure"]:
-                b_type.append(AIpredict(p, self.PClassiModel))
+                if p == []:
+                    b_type.append(np.nan)
+                else:
+                    b_type.append(AIpredict(p, self.PClassiModel))
             sum_results[cnt]["b_type"] = b_type
                     
             logger.info('Breath prediction completed.')
-        # except Exception as e:
-            # logger.error(f'{e}')
         return sum_results
 
     def _get_recon(self,sum_results):
@@ -262,10 +264,13 @@ class PostProcessor(QtCore.QObject):
             self.update_subpbar.emit(60,f'Starting breath recon ...{dObj["hour"]}')
 
             for idx, p in enumerate(dObj["pressure"]):
-                flow = dObj["pressure"][idx]
-                AImag.append(recon(flow, p, reconModel))
-            filtered_AImag = [a for a in AImag if not np.isnan(a)]
-            dObj["AImag"] = filtered_AImag
+                if p == []:
+                    AImag.append(np.nan)
+                else:
+                    flow = dObj["pressure"][idx]
+                    AImag.append(recon(flow, p, reconModel))
+            # filtered_AImag = [a for a in AImag if not np.isnan(a)]
+            dObj["AImag"] = AImag
         logger.info('Breath recon prediction completed.')
         return sum_results
 
@@ -288,7 +293,8 @@ class PostProcessor(QtCore.QObject):
             hour = results['hour']
             b_num_all = results['b_num_all']
             b_len = results['b_len']
-            saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour)
+            debug = results['debug']
+            saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour, debug)
 
 
     def handle_result(self,sum_results):
@@ -297,6 +303,14 @@ class PostProcessor(QtCore.QObject):
         """
         logger.info('PostProcessor.handle_result(): task finished')
         r_dialy = self.combine_allday_breath(sum_results)
+
+        # Generalize plot parameters
+        self.xaxis = [r_dialy['hours'][i][0:5].replace('-','') for i in range(len(r_dialy['hours']))]
+        if len(self.xaxis) > 14:
+            self.rot_angle = 45
+        else:
+            self.rot_angle = 0
+
         self.populate_table(r_dialy)            # Populate results summary table
         self.plotBox(r_dialy)                   # Plot boxplot of resp mechanics
         self.plotAIBar(r_dialy)                 # Plot barchart of Asynchrony analysis
@@ -394,33 +408,47 @@ class PostProcessor(QtCore.QObject):
             item.setText(str(r_dialy[params[i]]['q95']))
             self.ui.tableWidget_2.setItem(2, i, item)
         
+    def rm_nan(self,input):
+        """Removes nan from sublists in master lists
+
+        Args:
+            input (list): [[1,2,nan],[5,7,8],[...]]
+
+        Returns:
+            out: output of input w/o nan values
+        """
+        out = []
+        for i in input:
+            out.append([a for a in i if ~np.isnan(a)])
+        return out
+    
     def plotBox(self,res):
         """
         "" Plot boxplot of resp mechanics
         """
+        # rm_nan = lambda input: [a for a in input if ~np.isnan(a)] 
         # define lists for mpl plots
         plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPEEPWidget.canvas,
                 self.ui.poPIPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
                 self.ui.poAMWidget.canvas]
         y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$','%']
-        xaxis = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
+       
         params = ['Ers','Rrs','PEEP','PIP','TV','DP','AImag']
         titles = [r'Elastance ($E_{rs}$)',r'Resistance ($R_{rs}$)','Positive End-Expiratory Pressure (PEEP)','Peak Inspiratory Pressure (PIP)',
                 r'Tidal Volume ($V_t$)','PIP-PEEP',r'Asynchrony Magnitude ($M_{asyn}$)']
 
-        if len(xaxis) > 14:
-            rot_angle = 45
-        else:
-            rot_angle = 0
+      
 
         # setup and draw plots in for loop
         for i in range(len(plots)):
             plots[i].ax.set_title(titles[i])
             plots[i].ax.set_xlabel('Hour (24-hour notation)')
             plots[i].ax.set_ylabel(y_labels[i])
-            plots[i].ax.boxplot(res[params[i]]['raw'],labels=xaxis, showfliers=False)
-            plots[i].ax.set_xticklabels(xaxis, rotation = rot_angle)
+            plots[i].ax.boxplot( self.rm_nan(res[params[i]]['raw']),labels = self.xaxis, showfliers = False)
+            plots[i].ax.set_xticklabels(self.xaxis, rotation = self.rot_angle)
             plots[i].draw()
+        
+        self.ui.poAMWidget.canvas.ax.set_ylim(0,100)
 
         for i in range(len(plots)):
             plots[i].fig.set_size_inches(14,4)
@@ -430,7 +458,7 @@ class PostProcessor(QtCore.QObject):
         """
         "" Plot barchart of Asynchrony analysis
         """
-        xaxis = [res['hours'][i][0:5] for i in range(len(res['hours']))]
+        
         b_types = res['b_type']
         Asyn, Norm, Asyn_perc, Norm_perc, Total = [],[],[],[],[]
         for b in b_types:
@@ -445,19 +473,14 @@ class PostProcessor(QtCore.QObject):
                 Norm_perc.append(0)
         self.ui.label_PO_AI.setText(str(round(statistics.median(Asyn_perc),2)) + " %")
 
-        if len(xaxis) > 14:
-            rot_angle = 45
-        else:
-            rot_angle = 0
-        
-        self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Norm_perc, width=0.35, label='Normal')
-        bars = self.ui.poAIWidget.canvas.ax.bar(x=xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
+        self.ui.poAIWidget.canvas.ax.bar(x = self.xaxis, height=Norm_perc, width=0.35, label='Normal')
+        bars = self.ui.poAIWidget.canvas.ax.bar(x = self.xaxis, height=Asyn_perc, width=0.35, bottom=Norm_perc, label='Asynchrony')
         self.ui.poAIWidget.canvas.ax.set_title('Asynchrony Index Trend')
         self.ui.poAIWidget.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
         self.ui.poAIWidget.canvas.ax.set_ylim([0,110])
         self.ui.poAIWidget.canvas.ax.legend(loc=1)
-        self.ui.poAIWidget.canvas.ax.set_xticklabels(xaxis, rotation = rot_angle)
+        self.ui.poAIWidget.canvas.ax.set_xticklabels( self.xaxis, rotation = self.rot_angle)
         self.ui.poAIWidget.canvas.draw()
         self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
         self.ui.poAIWidget.canvas.fig.savefig(f'{self.dirSelected}/AI.png', dpi=300)
@@ -472,38 +495,37 @@ class PostProcessor(QtCore.QObject):
         annot = self.ui.poAIWidget.canvas.ax.annotate(text, xy=(x,y), xytext=(-20,2),textcoords="offset points")
 
     def plotMasyn2(self,res):
-        x = [res['hours'][i][0:5].replace('-','') for i in range(len(res['hours']))]
-        
-        Masyn = [sum(res['AImag']['raw'][i])/res['b_count'][i] for i in range(len(res['hours']))]
+
+        Masyn = [np.nansum(res['AImag']['raw'][i])/res['b_count'][i] for i in range(len(res['hours']))]
         Masyn_Asyn = []
         for i in range(len(res['hours'])):
             AImag = res['AImag']['raw'][i]
             AI = res['b_type'][i]
             Masyn_Asyn.append([AImag[m] for m in range(len(AImag)) if AI[m] == 'Asyn'])
-
+        
         Masyn3 = [sum(Masyn_Asyn[i])/res['b_count'][i] for i in range(len(res['hours']))]
         self.ui.poAMWidget_2.canvas.ax.set_title('Average Asynchrony Magnitude in an hour')
-        self.ui.poAMWidget_2.canvas.ax.plot(x,Masyn, marker='x', mec = 'r', label=r'$\sum M_{asyn,All}$')
-        self.ui.poAMWidget_2.canvas.ax.plot(x,Masyn3, marker='o', mec = 'g', label=r'$\sum M_{asyn,AB}$')
+        self.ui.poAMWidget_2.canvas.ax.set_xlabel('Hour (24-hour notation)')
+        self.ui.poAMWidget_2.canvas.ax.set_ylabel('%')
+        self.ui.poAMWidget_2.canvas.ax.plot(self.xaxis,Masyn, marker='x', mec = 'r', label=r'$\sum M_{asyn,All}$')
+        self.ui.poAMWidget_2.canvas.ax.plot(self.xaxis,Masyn3, marker='o', mec = 'g', label=r'$\sum M_{asyn,AB}$')
         self.ui.poAMWidget_2.canvas.ax.legend(loc=1)
+        self.ui.poAMWidget_2.canvas.ax.set_ylim(0,50)
         self.ui.poAMWidget_2.canvas.fig.set_size_inches(14,4)
         self.ui.poAMWidget_2.canvas.fig.savefig(f'{self.dirSelected}/Masyn_avg.png', dpi=300)
 
-        Masyn_AB = [Masyn_Asyn[i] for i in range(len(res['hours']))]
-        self.plotMasyn4(x, Masyn_AB)
+        # Link to plot box Masyn (AB only)
+        Masyn_AB = [i if len(i)>0 else [0] for i in Masyn_Asyn] # add baseline 0 to list if AI = 0%
+        self.plotMasynAB(Masyn_AB)
 
-    def plotMasyn4(self, x, Masyn_AB):
-        
-        if len(x) > 14:
-            rot_angle = 45
-        else:
-            rot_angle = 0
+    def plotMasynAB(self, Masyn_AB):
         
         self.ui.poAMWidget_3.canvas.ax.set_title(r'Asynchrony Magnitude (AB) ($M_{asyn,AB}$)')
         self.ui.poAMWidget_3.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAMWidget_3.canvas.ax.set_ylabel('%')
-        self.ui.poAMWidget_3.canvas.ax.boxplot(Masyn_AB, labels=x, showfliers=False)
-        self.ui.poAMWidget_3.canvas.ax.set_xticklabels(x, rotation = rot_angle)
+        self.ui.poAMWidget_3.canvas.ax.set_ylim(0,100)
+        self.ui.poAMWidget_3.canvas.ax.boxplot( self.rm_nan(Masyn_AB), labels = self.xaxis, showfliers = False)
+        self.ui.poAMWidget_3.canvas.ax.set_xticklabels(self.xaxis, rotation = self.rot_angle)
         self.ui.poAMWidget_3.canvas.draw()
         self.ui.poAMWidget_3.canvas.fig.set_size_inches(14,4)
         self.ui.poAMWidget_3.canvas.fig.savefig(f'{self.dirSelected}/Masyn_AB.png', dpi=300)

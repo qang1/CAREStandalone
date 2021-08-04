@@ -55,16 +55,19 @@ class Worker(QtCore.QObject):
             now_count += 1
             progress = int((now_count/b_count)*100)
             self.update_pbar.emit(progress,'Predicting breath ...')
-            try:
-                b_type.append(AIpredict(p, self.PClassiModel))
-            except:
-                b_type.append(200)
+            if p == []:
+                b_type.append(np.nan)
+            else:
+                try:
+                    b_type.append(AIpredict(p, self.PClassiModel))
+                except:
+                    b_type.append(np.nan)
 
         logger.info('Breath recon prediction completed.')
         
         return b_type
 
-    def _get_recon(self,pressure,flow):
+    def _get_recon(self, pressure, flow):
 
         AImag = []
         logger.info(f'Loading recon model...')
@@ -75,22 +78,27 @@ class Worker(QtCore.QObject):
         self.update_pbar.emit(80,f'Starting breath recon ...')
 
         for idx, p in enumerate(pressure):
-            q = flow[idx]
-            AImag.append(recon(q, p, reconModel))
-        filtered_AImag = [a for a in AImag if not np.isnan(a)] 
+            if p == []:
+                AImag.append(np.nan)
+            else:
+                q = flow[idx]
+                AImag.append(recon(q, p, reconModel))
+        
         logger.info('Breath recon prediction completed.')
-        return filtered_AImag
+        return AImag
 
     def _calc_ER(self):
         self.update_pbar.emit(20,'Calculating respiratory mechanics...')
         logger.info('_calc_ER run')
         
-        P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len = Elastance().calcRespMechanics(self.fname)
+        P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len, debug = Elastance().calcRespMechanics(self.fname)
         b_type = self._get_prediction(P_A, b_count)
         AImag = self._get_recon(P_A, Q_A)
+
+       
         
         self.update_pbar.emit(90,'Calculation complete. Processing data...')
-        return P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len
+        return P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, debug
 
     def run(self):
 
@@ -103,7 +111,7 @@ class Worker(QtCore.QObject):
         hour = str(fname.split('_')[3])
 
         try:
-            P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len = self.fetchDbData()
+            P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, debug = self.fetchDbData()
             self.update_pbar.emit(80,'Fetching data from database...')
         except Exception as e:
             logger.info(f'Initiating calculation...{e}')
@@ -111,23 +119,37 @@ class Worker(QtCore.QObject):
             self.update_pbar.emit(50,'Loading model ...')
             
 
-            P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len = self._calc_ER()
-            saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour)
+            P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, debug = self._calc_ER()
+            
+            saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour, debug)
         
         self.done.emit()
         self.update_pbar.emit(90,'Populating Graphics...')
         self.ui.label_breath_no.setText(str(b_count))
 
         # Plot line, box, pie chart; populate resp table
-        self._plotData(P, Q, Ers, Rrs, PEEP_A, b_num_all, b_len)
-        self._plotBoxPlot(P, Q, Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A, AImag)
-        self._populateTable(_calcQuartiles(Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A))
+        self.printDebug(debug, b_count)
+        self._plotLine(P, Q, Ers, Rrs, PEEP_A, b_num_all, b_len)
+        self._plotBox(Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A, AImag)
+        self._writeTable(_calcQuartiles(Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A))
         self._plotPie(b_type)
         self.update_pbar.emit(100,'Processing Done...')
         self.update_UI.emit()
         self.finished.emit()
 
-    def _plotData(self,P, Q, E, R, PEEP_A, b_num_all, b_len):
+    def printDebug(self,debug, b_count):
+         # Display debug logs
+        txt = ''
+        for r in debug['rejected']:
+            txt += f'BS {r[0]}: {r[1]}\n' 
+        self.ui.plainTextEdit.setPlainText(txt)
+        sum_b_counter = f"Summary:\n========================\nNumber of breath analysed: {debug['b_counter'][0]}\nFailed VT check: {debug['b_counter'][1]}\n"\
+                        f"Failed Rrs check: {debug['b_counter'][2]}\nFailed Ers check: {debug['b_counter'][3]}\nFailed len(P=Q) check: {debug['b_counter'][4]}\n"\
+                        f"Failed len(P) check: {debug['b_counter'][5]}\nTotal number of breath: {b_count}\n========================"
+        self.ui.plainTextEdit_2.setPlainText(sum_b_counter)
+
+
+    def _plotLine(self,P, Q, E, R, PEEP_A, b_num_all, b_len):
         """Plot data from thread"""
         # format time x-axis
         formatter = DateFormatter('%H:%M:%S')
@@ -146,18 +168,7 @@ class Worker(QtCore.QObject):
             
         logger.info(f'Time used to extend plot params: {time.process_time() - start}')
 
-        # reshape reducing num of points to half
-        group = 2
-        try:
-            x = np.array(x).reshape(-1, group).mean(axis=1)
-            P = np.array(P).reshape(-1, group).mean(axis=1)
-            Q = np.array(Q).reshape(-1, group).mean(axis=1)
-            E = np.array(E).reshape(-1, group).mean(axis=1)
-            R = np.array(R).reshape(-1, group).mean(axis=1)
-            R = np.array(R).reshape(-1, group).mean(axis=1)
-            PEEP = np.array(PEEP).reshape(-1, group).mean(axis=1)
-        except:
-            pass
+      
 
         # plot lines
         line1, = self.ui.graphWidget.canvas.ax.plot(x, P, label='Pressure')
@@ -201,19 +212,22 @@ class Worker(QtCore.QObject):
         legline.set_alpha(1.0 if visible else 0.2)
         self.ui.graphWidget.canvas.draw()
 
-    def _plotBoxPlot(self,P, Q, E, R, PEEP_A, PIP_A, TV_A, DP_A, AImag):
+    
+
+    def _plotBox(self, E, R, PEEP_A, PIP_A, TV_A, DP_A, AImag):
+        rm_nan = lambda input: [a for a in input if not np.isnan(a)] 
         """Plot data from thread"""
-        box1 = self.ui.boxGraphWidget.canvas.ax1.boxplot( E, labels=['Ers'])
-        box2 = self.ui.boxGraphWidget.canvas.ax2.boxplot( R, labels=['Rrs'])
-        box3 = self.ui.boxGraphWidget.canvas.ax3.boxplot( PEEP_A, labels=['PEEP'])
-        box4 = self.ui.boxGraphWidget.canvas.ax4.boxplot( PIP_A, labels=['PIP'])
-        box5 = self.ui.boxGraphWidget.canvas.ax5.boxplot( TV_A, labels=[r'$V_t$'])
-        box6 = self.ui.boxGraphWidget.canvas.ax6.boxplot( DP_A, labels=['PIP-PEEP'])
-        box7 = self.ui.AMBoxWidget.canvas.ax.boxplot( AImag, labels=['Masyn'])
+        box1 = self.ui.boxGraphWidget.canvas.ax1.boxplot( rm_nan(E), labels=['Ers'])
+        box2 = self.ui.boxGraphWidget.canvas.ax2.boxplot( rm_nan(R), labels=['Rrs'])
+        box3 = self.ui.boxGraphWidget.canvas.ax3.boxplot( rm_nan(PEEP_A), labels=['PEEP'])
+        box4 = self.ui.boxGraphWidget.canvas.ax4.boxplot( rm_nan(PIP_A), labels=['PIP'])
+        box5 = self.ui.boxGraphWidget.canvas.ax5.boxplot( rm_nan(TV_A), labels=[r'$V_t$'])
+        box6 = self.ui.boxGraphWidget.canvas.ax6.boxplot( rm_nan(DP_A), labels=['PIP-PEEP'])
+        box7 = self.ui.AMBoxWidget.canvas.ax.boxplot( rm_nan(AImag), labels=['Masyn'])
         self.ui.boxGraphWidget.canvas.draw()
         self.ui.AMBoxWidget.canvas.draw()
 
-    def _populateTable(self,res):
+    def _writeTable(self,res):
         """ Display info on first table """
         params = ['Ers','Rrs','PEEP','PIP','TV','DP']
         font = QtGui.QFont()
@@ -276,7 +290,7 @@ class Worker(QtCore.QObject):
         date = str(fname.split('_')[2])
         hour = str(fname.split('_')[3])
         query = QSqlQuery(self.db)
-        query.exec(f"""SELECT p, q, Ers_raw, Rrs_raw, b_count, b_type, b_num_all, b_len,
+        query.exec(f"""SELECT p, q, Ers_raw, Rrs_raw, b_count, b_type, b_num_all, b_len, debug,
                         PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw  FROM results 
                         WHERE p_no='{p_no}' AND date='{date}' AND hour='{hour}';
                         """)
@@ -290,13 +304,14 @@ class Worker(QtCore.QObject):
             b_type    = json.loads(query.value(5))
             b_num_all = json.loads(query.value(6))
             b_len     = json.loads(query.value(7))
-            PEEP_A    = json.loads(query.value(8))
-            PIP_A     = json.loads(query.value(9))
-            TV_A      = json.loads(query.value(10))
-            DP_A      = json.loads(query.value(11))
-            AImag     = json.loads(query.value(12))
+            debug     = json.loads(query.value(8))
+            PEEP_A    = json.loads(query.value(9))
+            PIP_A     = json.loads(query.value(10))
+            TV_A      = json.loads(query.value(11))
+            DP_A      = json.loads(query.value(12))
+            AImag     = json.loads(query.value(13))
             logger.info("DB entry retrieved successful")
-            return P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len
+            return P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, debug
         else:
             raise Exception
 

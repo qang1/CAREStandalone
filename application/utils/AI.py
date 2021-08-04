@@ -123,7 +123,7 @@ def recon(flow,temp_pressure,ReconModel):
     else:
         return np.nan
 
-def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_all, b_len, p_no, date, hour):
+def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_all, b_len, p_no, date, hour, debug):
         
     dObj = _calcQuartiles(Ers, Rrs, PEEP, PIP, TV, DP)
 
@@ -140,13 +140,14 @@ def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_
     b_type_encoded = json.dumps(b_type)
     b_num_all = json.dumps(b_num_all)
     b_len = json.dumps(b_len)
+    debug = json.dumps(debug)
 
     Norm_cnt = b_type.count('Normal')
     Asyn_cnt = b_type.count('Asyn')
     AI_index = round(Asyn_cnt/(Asyn_cnt+Norm_cnt)*100,2)
 
     query = QSqlQuery(db)
-    query.prepare(f"""INSERT INTO results (p_no, date, hour, p, q, b_count, b_type, b_num_all, b_len,
+    query.prepare(f"""INSERT INTO results (p_no, date, hour, p, q, b_count, b_type, b_num_all, b_len, debug,
                     Ers_raw, Rrs_raw, PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw,
                     Ers_q5,  Rrs_q5,  PEEP_q5,  PIP_q5,  TV_q5,  DP_q5,
                     Ers_q25, Rrs_q25, PEEP_q25, PIP_q25, TV_q25, DP_q25,
@@ -156,7 +157,7 @@ def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_
                     Ers_min, Rrs_min, PEEP_min, PIP_min, TV_min, DP_min,
                     Ers_max, Rrs_max, PEEP_max, PIP_max, TV_max, DP_max,
                     AI_Norm_cnt, AI_Asyn_cnt, AI_Index) 
-                    VALUES (:p_no, :date, :hour, :p, :q, :b_count, :b_type, :b_num_all, :b_len,
+                    VALUES (:p_no, :date, :hour, :p, :q, :b_count, :b_type, :b_num_all, :b_len, :debug,
                     :Ers_raw, :Rrs_raw, :PEEP_raw, :PIP_raw, :TV_raw, :DP_raw, :AM_raw,
                     :Ers_q5,  :Rrs_q5,  :PEEP_q5,  :PIP_q5,  :TV_q5,  :DP_q5,
                     :Ers_q25, :Rrs_q25, :PEEP_q25, :PIP_q25, :TV_q25, :DP_q25,
@@ -182,6 +183,7 @@ def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_
     query.bindValue(":AM_raw", AM_raw)
     query.bindValue(":b_num_all", b_num_all)
     query.bindValue(":b_len", b_len)
+    query.bindValue(":debug", debug)
     
     query.bindValue(":Ers_q5", float(dObj['Ers']['q5']))
     query.bindValue(":Rrs_q5", float(dObj['Rrs']['q5']))

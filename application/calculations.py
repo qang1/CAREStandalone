@@ -8,6 +8,11 @@ Created on Wed Mar 17 11:06:47 2021
 import numpy as np
 from scipy import integrate
 import math
+import logging
+
+# Get the logger specified in the file
+logger = logging.getLogger(__name__)
+logger.info('Thread module imported')
 
 class Elastance():
 
@@ -23,35 +28,60 @@ class Elastance():
         Returns:
             P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all
         """
-        pressure, flow, b_num_all, b_len, b_check = [], [], [], [], []
+        pressure, flow, b_num_all, b_len, rejected = [], [], [], [], []
         P, Q, Ers_A, Rrs_A, P_A, Q_A, PEEP_A, PIP_A, TV_A, DP_A = [],[],[],[],[],[],[],[],[],[]
         b_count = 0
+        b_counter = [0,0,0,0,0,0]
         with open(path, "r") as f:
-            for line in f:
+            for num, line in enumerate(f):
                 if ("BS," in line) == True:
                     b_num = self._extractBNum(line)
                 elif ("BE" in line) == True:
-                    if (len(pressure) >= 50) and (len(pressure) == len(flow)):
-                        E, R, PEEP, PIP, TidalVolume, _, _ = self.get_r(pressure, flow, True) # calculate respiratory parameter 
-                    
-                        if (abs(E)<100) & (abs(R)<100) & (TidalVolume<1):
-                            b_count += 1
-                            b_len.append(len(pressure))
-                            Ers_A.append(E)
-                            Rrs_A.append(R)
-                            P.extend(pressure)
-                            Q.extend(flow)
-                            P_A.append(pressure)
-                            Q_A.append(flow)
-                            PEEP_A.append(round(PEEP,1))
-                            PIP_A.append(round(PIP,1))
-                            TV_A.append(round(TidalVolume*1000))
-                            DP_A.append(round(PIP-PEEP,1))
-                            b_num_all.append(b_num)
+                    # return this no matter what
+                    b_count += 1
+                    b_len.append(len(pressure))
+                    P.extend(pressure)          # for pltting purpose, include all 
+                    Q.extend(flow)
+                    b_num_all.append(b_num)
+
+                    # Calc and filter breath
+                    if len(pressure) >= 50:
+                        if len(pressure) == len(flow):
+                            E, R, PEEP, PIP, TidalVolume, _, _ = self.get_r(pressure, flow, True) # calculate respiratory parameter 
+                            if abs(E) < 100:
+                                if abs(R) < 100:
+                                    if TidalVolume < 1:
+                                        P_A.append(pressure)
+                                        Q_A.append(flow)
+                                        Ers_A.append(E)
+                                        Rrs_A.append(R)
+                                        PEEP_A.append(round(PEEP,1))
+                                        PIP_A.append(round(PIP,1))
+                                        TV_A.append(round(TidalVolume*1000))
+                                        DP_A.append(round(PIP-PEEP,1))
+                                        b_counter[0] += 1
+                                    else:
+                                        self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                                        rejected.append((b_num,f'THRESHOLD: VT >= 1000ml, RAW: {round(TidalVolume*1000)}'))
+                                        b_counter[1] += 1
+                                else:
+                                    self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                                    rejected.append((b_num,f'THRESHOLD: abs(R) > 100, RAW: {R}'))
+                                    b_counter[2] += 1
+                            else:
+                                self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                                rejected.append((b_num,f'THRESHOLD: abs(E) > 100, RAW: {E}'))
+                                b_counter[3] += 1
                         else:
-                            pass
+                            self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                            rejected.append((b_num,f'THRESHOLD: len(pressure) != len(flow), RAW: {len(pressure)},{len(flow)}'))
+                            b_counter[4] += 1
                     else:
-                        pass
+                        self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                        rejected.append((b_num,f'THRESHOLD: len(pressure) <= 50, RAW: {len(pressure)}'))
+                        b_counter[5] += 1
+
+                    # Clear P and Q temporary list
                     pressure, flow = [], [] # reset temp list
                 else:
                     if line != '': # Filter out empty lines
@@ -59,18 +89,45 @@ class Elastance():
                         try:
                             p_split = float(section[1])
                             q_split = float(section[0])
-                                
+                            last_sec = section    
                             if abs(p_split) <= 100 and abs(q_split) <= 1000:
                                 if len(pressure) > 1:
-                                    if abs(p_split-pressure[-1]) <= 50 and abs(q_split-flow[-1]) <= 50:
-                                        pressure.append(round(p_split,1))
-                                        flow.append(round(q_split,1))
+                                    # Get previous point
+                                    P_i = float(last_sec[1])
+                                    Q_i = float(last_sec[0])
+
+                                    if abs(p_split - P_i) <= 50:
+                                        if abs(q_split - Q_i) <= 100:
+                                            pressure.append(round(p_split,1))
+                                            flow.append(round(q_split,1))
+                                        else:
+                                            rejected.append((b_num,f'LINE DEL: Qi-Qi-1 >= 50, RAW: {q_split}, {Q_i}'))
+                                    else:
+                                        rejected.append((b_num,f'LINE DEL: Pi-Pi-1 >= 50, RAW: {p_split}, {P_i}'))
                                 else:
                                     pressure.append(round(p_split,1))
                                     flow.append(round(q_split,1))
-                        except:
-                            pass
-        return P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len
+                            else:
+                                rejected.append((b_num,f'LINE DEL: abs(P)<=100 or abs(Q)<=1000, RAW: {p_split}, {q_split}'))
+                        except Exception as e:
+                            logger.info(e)
+        
+        debug = {
+            'rejected': rejected,
+            'b_counter': b_counter
+        }
+        return P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len, debug
+
+    def _add_Nan(self, P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A):
+        P_A.append([])
+        Q_A.append([])
+        Ers_A.append(np.nan)
+        Rrs_A.append(np.nan)
+        PEEP_A.append(np.nan)
+        PIP_A.append(np.nan)
+        TV_A.append(np.nan)
+        DP_A.append(np.nan)
+        return P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A
     
     def _get_V(self,Q):
         b_points = np.size(Q)
@@ -189,7 +246,7 @@ class Elastance():
 
 def _calcQuartiles(E, R, PEEP_A, PIP_A, TV_A, DP_A):
     """ Calc quartiles """
-    TV_A = [int(x) for x in TV_A]
+    TV_A = [np.around(x,0) for x in TV_A]
     params = ['Ers','Rrs','PEEP','PIP','TV','DP']
     paramsVal = [E, R, PEEP_A, PIP_A, TV_A, DP_A]
     rounding = [1,1,1,1,0,1]
