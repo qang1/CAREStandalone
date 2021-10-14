@@ -5,7 +5,7 @@ import json
 
 # Third party imports
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, QSettings
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery
 from PyQt5.QtWidgets import QMessageBox, QHeaderView
 from PyQt5 import QtCore
@@ -28,6 +28,8 @@ class Worker(QtCore.QObject):
     done        = pyqtSignal()
     open_pbar   = pyqtSignal()
     update_pbar = pyqtSignal(int,str)
+    printDebug  = pyqtSignal(dict,int)
+    writeTable  = pyqtSignal(dict)
     update_UI   = pyqtSignal()
     status      = pyqtSignal(int)
     run_token   = True
@@ -39,6 +41,7 @@ class Worker(QtCore.QObject):
         self.ui = ui
         self.hour = self.fname.split('/')[-1].replace('.txt','').split('_')[3]
         self.model_name = None
+        self.settings = QSettings()
 
     def _get_prediction(self, pressure, b_count):
         
@@ -95,8 +98,6 @@ class Worker(QtCore.QObject):
         b_type = self._get_prediction(P_A, b_count)
         AImag = self._get_recon(P_A, Q_A)
 
-       
-        
         self.update_pbar.emit(90,'Calculation complete. Processing data...')
         return P, Q, Ers_A, Rrs_A, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, debug
 
@@ -120,34 +121,24 @@ class Worker(QtCore.QObject):
             
 
             P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, debug = self._calc_ER()
-            
-            saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour, debug)
+            if self.settings.value('saveDB', True, type=bool) == True:
+                saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour, debug)
         
         self.done.emit()
         self.update_pbar.emit(90,'Populating Graphics...')
         self.ui.label_breath_no.setText(str(b_count))
 
         # Plot line, box, pie chart; populate resp table
-        self.printDebug(debug, b_count)
         self._plotLine(P, Q, Ers, Rrs, PEEP_A, b_num_all, b_len)
         self._plotBox(Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A, AImag)
-        self._writeTable(_calcQuartiles(Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A))
         self._plotPie(b_type)
+
+        # Emit signals
+        self.printDebug.emit(debug, b_count)
+        self.writeTable.emit(_calcQuartiles(Ers, Rrs, PEEP_A, PIP_A, TV_A, DP_A))
         self.update_pbar.emit(100,'Processing Done...')
         self.update_UI.emit()
         self.finished.emit()
-
-    def printDebug(self,debug, b_count):
-         # Display debug logs
-        txt = ''
-        for r in debug['rejected']:
-            txt += f'BS {r[0]}: {r[1]}\n' 
-        self.ui.plainTextEdit.setPlainText(txt)
-        sum_b_counter = f"Summary:\n========================\nNumber of breath analysed: {debug['b_counter'][0]}\nFailed VT check: {debug['b_counter'][1]}\n"\
-                        f"Failed Rrs check: {debug['b_counter'][2]}\nFailed Ers check: {debug['b_counter'][3]}\nFailed len(P=Q) check: {debug['b_counter'][4]}\n"\
-                        f"Failed len(P) check: {debug['b_counter'][5]}\nTotal number of breath: {b_count}\n========================"
-        self.ui.plainTextEdit_2.setPlainText(sum_b_counter)
-
 
     def _plotLine(self,P, Q, E, R, PEEP_A, b_num_all, b_len):
         """Plot data from thread"""
@@ -167,8 +158,6 @@ class Worker(QtCore.QObject):
             PEEP.extend([PEEP_A[i] for x in range(b_len[i])])
             
         logger.info(f'Time used to extend plot params: {time.process_time() - start}')
-
-      
 
         # plot lines
         line1, = self.ui.graphWidget.canvas.ax.plot(x, P, label='Pressure')
@@ -191,14 +180,16 @@ class Worker(QtCore.QObject):
         self.ui.graphWidget.canvas.mpl_connect('pick_event', self.on_pick)
 
         # annotate breath number (beta)
-        if b_num_all != []:
-            x_annotate = [datetime.strptime(self.hour, "%H-%M-%S")]
-            
-            for i in range(len(b_len)-1):
-                x_annotate.append(x_annotate[i]+timedelta(milliseconds=20*b_len[i]))
-            
-            for i, x in enumerate(x_annotate):
-                annot = self.ui.graphWidget.canvas.ax.annotate(b_num_all[i], xy=(x,1), xytext=(0,2),textcoords="offset points")
+        annot = False
+        if annot:
+            if b_num_all != []:
+                x_annotate = [datetime.strptime(self.hour, "%H-%M-%S")]
+                
+                for i in range(len(b_len)-1):
+                    x_annotate.append(x_annotate[i]+timedelta(milliseconds=20*b_len[i]))
+                
+                for i, x in enumerate(x_annotate):
+                    annot = self.ui.graphWidget.canvas.ax.annotate(b_num_all[i], xy=(x,1), xytext=(0,2),textcoords="offset points")
     
     def on_pick(self,event):
         # On the pick event, find the original line corresponding to the legend
@@ -212,8 +203,6 @@ class Worker(QtCore.QObject):
         legline.set_alpha(1.0 if visible else 0.2)
         self.ui.graphWidget.canvas.draw()
 
-    
-
     def _plotBox(self, E, R, PEEP_A, PIP_A, TV_A, DP_A, AImag):
         rm_nan = lambda input: [a for a in input if not np.isnan(a)] 
         """Plot data from thread"""
@@ -226,31 +215,6 @@ class Worker(QtCore.QObject):
         box7 = self.ui.AMBoxWidget.canvas.ax.boxplot( rm_nan(AImag), labels=['Masyn'])
         self.ui.boxGraphWidget.canvas.draw()
         self.ui.AMBoxWidget.canvas.draw()
-
-    def _writeTable(self,res):
-        """ Display info on first table """
-        params = ['Ers','Rrs','PEEP','PIP','TV','DP']
-        font = QtGui.QFont()
-        font.setPointSize(10)
-        for i in range(len(params)):
-            item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
-            item.setFont(font)
-            item.setText(str(res[params[i]]['q5']))
-            self.ui.tableWidget.setItem(0, i, item)
-            item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
-            item.setFont(font)
-            item.setText(str(res[params[i]]['q50']) + '\n [ ' +  str(res[params[i]]['q25']) + ' - ' + str(res[params[i]]['q75']) + ' ] ')
-            self.ui.tableWidget.setItem(1, i, item)
-            item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
-            item.setFont(font)
-            item.setText(str(res[params[i]]['q95']))
-            self.ui.tableWidget.setItem(2, i, item)
 
     def _plotPie(self,b_type):
         

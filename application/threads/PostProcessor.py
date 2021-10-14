@@ -3,6 +3,7 @@ from multiprocessing.pool import ThreadPool
 import statistics
 import time
 import json
+import csv
 import os
 
 # Third party imports
@@ -12,6 +13,7 @@ from PyQt5.QtSql import  QSqlQuery
 import numpy as np
 import logging
 from keras import backend as K
+import scipy.stats as st
 
 # Local application imports
 from calculations import Elastance, _calcQuartiles
@@ -74,6 +76,8 @@ class PostProcessor(QtCore.QObject):
             logging.info(f'Plot resolution (30mins): {chopHalf}')
             sum_results = self.calcHalf(sum_results)
 
+ 
+
         # Finalize, process, and display data
         self.update_subpbar.emit(100,f'Processing complete. Populating result...')
         self.handle_result(sum_results)
@@ -94,24 +98,24 @@ class PostProcessor(QtCore.QObject):
         _, p_no, date, hour = f.replace('.txt','').split('_')
         logger.info(f'DB lookup.Params - p_no: {p_no}; date: {date}; hour: {hour}')
         query = QSqlQuery(self.db)
-        query.exec(f"""SELECT p, q, Ers_raw, Rrs_raw, b_count, b_type,
+        query.exec(f"""SELECT p, q, Ers_raw, Rrs_raw, b_count, b_type, b_len,
                         PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw  FROM results 
                         WHERE p_no='{p_no}' AND date='{date}' AND hour='{hour}';
                         """)
         if query.next():
             query.first()
-            logger.warning(f' DEBUG: first() true')
             P = json.loads(query.value(0))
             Q = json.loads(query.value(1))
             Ers = json.loads(query.value(2))
             Rrs = json.loads(query.value(3))
             b_count = query.value(4)
             b_type = json.loads(query.value(5))
-            PEEP_A = json.loads(query.value(6))
-            PIP_A = json.loads(query.value(7))
-            TV_A = json.loads(query.value(8))
-            DP_A = json.loads(query.value(9))
-            AM_raw = json.loads(query.value(10))
+            b_len = json.loads(query.value(6))
+            PEEP_A = json.loads(query.value(7))
+            PIP_A = json.loads(query.value(8))
+            TV_A = json.loads(query.value(9))
+            DP_A = json.loads(query.value(10))
+            AM_raw = json.loads(query.value(11))
             logger.info('DB entry found. Breath count: %s', b_count)
 
             dObj = {
@@ -126,6 +130,7 @@ class PostProcessor(QtCore.QObject):
                 'DP': DP_A,
                 'b_count': b_count,
                 'b_type': b_type,
+                'b_len': b_len,
                 'AImag': AM_raw
             }
             return dObj
@@ -148,46 +153,71 @@ class PostProcessor(QtCore.QObject):
             sum_results: list of output results [{'01-00-00'},{01-30-00},...]
         """
         sum_results = []
-        for i in input_results:
-            # Split into half
-            middle_index = i['b_count']//2
+        for idx,input in enumerate(input_results):
+            if idx == 0:
+                b_len = input['b_len']
+                b_time = sum(b_len)*0.05
+                if b_time < 30:
+                    logger.info(f'b_time <30: {b_time}')
+                    # Do Second half only ,i.e [{'01-30-00'},{02-00-00},...]   
+                    hour_half = f'{input["hour"].split("-")[0]}-30-00' # 01-30-00
 
-            # First half    
-            Firsthalf_dObj = {
-                'p_no': i['p_no'],
-                'date': i['date'],
-                'hour': i['hour'],
-                'Ers': i['Ers'][:middle_index],
-                'Rrs': i['Rrs'][:middle_index],
-                'PEEP': i['PEEP'][:middle_index],
-                'PIP': i['PIP'][:middle_index],
-                'TV': i['TV'][:middle_index],
-                'DP': i['DP'][:middle_index],
-                'b_type': i['b_type'][:middle_index],
-                'AImag': i['AImag'][:middle_index],
-                'b_count': i['b_count']
-            }
-            sum_results.append(Firsthalf_dObj)
+                    Secondhalf_dObj = {
+                        'p_no': input['p_no'],
+                        'date': input['date'],
+                        'hour': hour_half,
+                        'Ers': input['Ers'],
+                        'Rrs': input['Rrs'],
+                        'PEEP': input['PEEP'],
+                        'PIP': input['PIP'],
+                        'TV': input['TV'],
+                        'DP': input['DP'],
+                        'b_type': input['b_type'],
+                        'AImag': input['AImag'],
+                        'b_count': input['b_count']
+                    }
 
-            # Second half    
-            hour_half = f'{i["hour"].split("-")[0]}-30-00' # 01-30-00
+                    sum_results.append(Secondhalf_dObj)
+            else:
+                # Split into half using number of breath in an hour
+                middle_index = input['b_count']//2
 
-            Secondhalf_dObj = {
-                'p_no': i['p_no'],
-                'date': i['date'],
-                'hour': hour_half,
-                'Ers': i['Ers'][middle_index:],
-                'Rrs': i['Rrs'][middle_index:],
-                'PEEP': i['PEEP'][middle_index:],
-                'PIP': i['PIP'][middle_index:],
-                'TV': i['TV'][middle_index:],
-                'DP': i['DP'][middle_index:],
-                'b_type': i['b_type'][middle_index:],
-                'AImag': i['AImag'][middle_index:],
-                'b_count': i['b_count']
-            }
+                # First half    
+                Firsthalf_dObj = {
+                    'p_no': input['p_no'],
+                    'date': input['date'],
+                    'hour': input['hour'],
+                    'Ers': input['Ers'][:middle_index],
+                    'Rrs': input['Rrs'][:middle_index],
+                    'PEEP': input['PEEP'][:middle_index],
+                    'PIP': input['PIP'][:middle_index],
+                    'TV': input['TV'][:middle_index],
+                    'DP': input['DP'][:middle_index],
+                    'b_type': input['b_type'][:middle_index],
+                    'AImag': input['AImag'][:middle_index],
+                    'b_count': input['b_count']
+                }
+                sum_results.append(Firsthalf_dObj)
 
-            sum_results.append(Secondhalf_dObj)
+                # Second half    
+                hour_half = f'{input["hour"].split("-")[0]}-30-00' # 01-30-00
+
+                Secondhalf_dObj = {
+                    'p_no': input['p_no'],
+                    'date': input['date'],
+                    'hour': hour_half,
+                    'Ers': input['Ers'][middle_index:],
+                    'Rrs': input['Rrs'][middle_index:],
+                    'PEEP': input['PEEP'][middle_index:],
+                    'PIP': input['PIP'][middle_index:],
+                    'TV': input['TV'][middle_index:],
+                    'DP': input['DP'][middle_index:],
+                    'b_type': input['b_type'][middle_index:],
+                    'AImag': input['AImag'][middle_index:],
+                    'b_count': input['b_count']
+                }
+
+                sum_results.append(Secondhalf_dObj)
         return sum_results
 
     def fun(self,arg):
@@ -296,7 +326,6 @@ class PostProcessor(QtCore.QObject):
             debug = results['debug']
             saveDb(self.db, P, Q, Ers, Rrs, b_count, b_type, PEEP_A, PIP_A, TV_A, DP_A, AImag, b_num_all, b_len, p_no, date, hour, debug)
 
-
     def handle_result(self,sum_results):
         """
         "" Handles post processing of results after calculation
@@ -314,7 +343,7 @@ class PostProcessor(QtCore.QObject):
         self.populate_table(r_dialy)            # Populate results summary table
         self.plotBox(r_dialy)                   # Plot boxplot of resp mechanics
         self.plotAIBar(r_dialy)                 # Plot barchart of Asynchrony analysis
-        self.plotMasyn2(r_dialy)                 # Plot barchart of Asynchrony analysis
+        self.plotMasyn2(r_dialy)                 # Plot linechart of Asynchrony analysis
         self.processResMulti.emit(r_dialy)      # Send signal to mainwindow to update UI
         self.hide_pbar.emit()                   # Hide progress bar
         self.finished.emit()                    # End thread
@@ -429,15 +458,12 @@ class PostProcessor(QtCore.QObject):
         # rm_nan = lambda input: [a for a in input if ~np.isnan(a)] 
         # define lists for mpl plots
         plots = [self.ui.poErsWidget.canvas,self.ui.poRrsWidget.canvas,self.ui.poPEEPWidget.canvas,
-                self.ui.poPIPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas,
-                self.ui.poAMWidget.canvas]
-        y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$','%']
+                self.ui.poPIPWidget.canvas,self.ui.poVtWidget.canvas,self.ui.poDpWidget.canvas]
+        y_labels = [r'$cmH_2O/l$',r'$cmH_2Os/l$',r'$cmH_2O$',r'$cmH_2O$','ml',r'$cmH_2O$']
        
-        params = ['Ers','Rrs','PEEP','PIP','TV','DP','AImag']
+        params = ['Ers','Rrs','PEEP','PIP','TV','DP']
         titles = [r'Elastance ($E_{rs}$)',r'Resistance ($R_{rs}$)','Positive End-Expiratory Pressure (PEEP)','Peak Inspiratory Pressure (PIP)',
-                r'Tidal Volume ($V_t$)','PIP-PEEP',r'Asynchrony Magnitude ($M_{asyn}$)']
-
-      
+                r'Tidal Volume ($V_t$)','PIP-PEEP']
 
         # setup and draw plots in for loop
         for i in range(len(plots)):
@@ -451,8 +477,11 @@ class PostProcessor(QtCore.QObject):
         self.ui.poAMWidget.canvas.ax.set_ylim(0,100)
 
         for i in range(len(plots)):
-            plots[i].fig.set_size_inches(14,4)
-            plots[i].fig.savefig(f'{self.dirSelected}/{params[i]}.png', dpi=300)
+            try:
+                plots[i].fig.set_size_inches(14,4)
+                plots[i].fig.savefig(f'{self.dirSelected}/{params[i]}.png', dpi=300)
+            except Exception as e:
+                logger.warning(f'PO savefig err: ' + str(e))
 
     def plotAIBar(self,res):
         """
@@ -480,6 +509,7 @@ class PostProcessor(QtCore.QObject):
         self.ui.poAIWidget.canvas.ax.set_ylabel('Asynchrony Index (%)')
         self.ui.poAIWidget.canvas.ax.set_ylim([0,110])
         self.ui.poAIWidget.canvas.ax.legend(loc=1)
+        self.ui.poAIWidget.canvas.ax.set_xticks(self.xaxis)
         self.ui.poAIWidget.canvas.ax.set_xticklabels( self.xaxis, rotation = self.rot_angle)
         self.ui.poAIWidget.canvas.draw()
         self.ui.poAIWidget.canvas.fig.set_size_inches(14,4)
@@ -496,27 +526,76 @@ class PostProcessor(QtCore.QObject):
 
     def plotMasyn2(self,res):
 
-        Masyn = [np.nansum(res['AImag']['raw'][i])/res['b_count'][i] for i in range(len(res['hours']))]
-        Masyn_Asyn = []
+        confidence = 0.95
+
+        # Calculate avg Masyn and SD
+        Masyn = [np.nanmean(res['AImag']['raw'][i]) for i in range(len(res['hours']))]
+        Masyn_CI = []
+        
+        # Calculate avg Masyn (AB only) and SD
+        MasynAB, MasynAB_CI = [], []
+
         for i in range(len(res['hours'])):
             AImag = res['AImag']['raw'][i]
             AI = res['b_type'][i]
-            Masyn_Asyn.append([AImag[m] for m in range(len(AImag)) if AI[m] == 'Asyn'])
+
+            l = [x for x in AImag if ~np.isnan(x)]
+            Masyn_sd = st.stats.sem(l)
+            sampleMean = np.nanmean(l)
+            n = len(l)
+            t = Masyn_sd * st.t.ppf((1 + confidence) / 2., n-1)
+            #create 95% confidence interval for the population mean
+            confidenceInterval_1 = st.norm.interval(alpha=confidence,loc=sampleMean,scale=Masyn_sd)
+            h = confidenceInterval_1[1]-sampleMean
+            Masyn_CI.append(h)
+            print(f'{t},{h},{abs(h-t)}')
+
         
-        Masyn3 = [sum(Masyn_Asyn[i])/res['b_count'][i] for i in range(len(res['hours']))]
+            tmp,tmp_all = [], []
+            for m in range(len(AImag)):
+                if AI[m] == 'Asyn':
+                    tmp.append(AImag[m])
+                    tmp_all.append(AImag[m])
+                else:
+                    tmp_all.append(0)
+
+            
+            MasynAB_sd = st.stats.sem(tmp)
+            n2 = len(tmp)
+            h2 = MasynAB_sd * st.t.ppf((1 + confidence) / 2., n2-1)
+            MasynAB_CI.append(h2)
+
+            MasynAB.append(np.nanmean(tmp_all))
+
+        
+
+        fname = f'{self.dirSelected}/Masyn.csv'
+        try:
+            with open(fname, mode='w', newline='') as csvfile:
+                w = csv.writer(csvfile)
+                # write header
+                w.writerow(('Hour','Masyn','Masyn_std','MasynAB','MasynAB_std'))
+                l = [tuple(res['hours']),tuple(Masyn),tuple(Masyn_CI),tuple(MasynAB),tuple(MasynAB_CI)]
+                new_l = zip(*l)
+                for i in new_l:
+                    w.writerow(i)
+               
+        except Exception as e:
+            print(e)
+
         self.ui.poAMWidget_2.canvas.ax.set_title('Average Asynchrony Magnitude in an hour')
         self.ui.poAMWidget_2.canvas.ax.set_xlabel('Hour (24-hour notation)')
-        self.ui.poAMWidget_2.canvas.ax.set_ylabel('%')
-        self.ui.poAMWidget_2.canvas.ax.plot(self.xaxis,Masyn, marker='x', mec = 'r', label=r'$\sum M_{asyn,All}$')
-        self.ui.poAMWidget_2.canvas.ax.plot(self.xaxis,Masyn3, marker='o', mec = 'g', label=r'$\sum M_{asyn,AB}$')
+        self.ui.poAMWidget_2.canvas.ax.set_ylabel('Magnitude (%)')
+        self.ui.poAMWidget_2.canvas.ax.errorbar(self.xaxis, Masyn, yerr=Masyn_CI, color='C3', ls='--', marker='d', mec = 'C3', mfc = 'C3', label=r'$M_{asyn,avg}$', capsize=5)
+        self.ui.poAMWidget_2.canvas.ax.errorbar(self.xaxis, MasynAB, yerr=MasynAB_CI, marker='o', mec = 'C0', mfc = 'w', label=r'$M_{asyn,avg(AB)}$', capsize=5)
         self.ui.poAMWidget_2.canvas.ax.legend(loc=1)
-        self.ui.poAMWidget_2.canvas.ax.set_ylim(0,50)
+        self.ui.poAMWidget_2.canvas.ax.set_ylim(0,100)
         self.ui.poAMWidget_2.canvas.fig.set_size_inches(14,4)
         self.ui.poAMWidget_2.canvas.fig.savefig(f'{self.dirSelected}/Masyn_avg.png', dpi=300)
 
         # Link to plot box Masyn (AB only)
-        Masyn_AB = [i if len(i)>0 else [0] for i in Masyn_Asyn] # add baseline 0 to list if AI = 0%
-        self.plotMasynAB(Masyn_AB)
+        #Masyn_AB = [i if len(i)>0 else [0] for i in Masyn_Asyn] # add baseline 0 to list if AI = 0%
+        # self.plotMasynAB(Masyn_AB)
 
     def plotMasynAB(self, Masyn_AB):
         

@@ -124,7 +124,8 @@ def recon(flow,temp_pressure,ReconModel):
         return np.nan
 
 def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_all, b_len, p_no, date, hour, debug):
-        
+
+    # Calculate quartiles    
     dObj = _calcQuartiles(Ers, Rrs, PEEP, PIP, TV, DP)
 
     # Encoding python object to json
@@ -224,14 +225,14 @@ def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_
     query.bindValue(":Rrs_min", float(dObj['Rrs']['min']))
     query.bindValue(":PEEP_min", dObj['PEEP']['min'])
     query.bindValue(":PIP_min", dObj['PIP']['min'])
-    query.bindValue(":TV_min", dObj['TV']['min'])
+    query.bindValue(":TV_min", int(dObj['TV']['min']))
     query.bindValue(":DP_min", dObj['DP']['min'])
     
     query.bindValue(":Ers_max", float(dObj['Ers']['max']))
     query.bindValue(":Rrs_max", float(dObj['Rrs']['max']))
     query.bindValue(":PEEP_max", dObj['PEEP']['max'])
     query.bindValue(":PIP_max", dObj['PIP']['max'])
-    query.bindValue(":TV_max", dObj['TV']['max'])
+    query.bindValue(":TV_max", int(dObj['TV']['max']))
     query.bindValue(":DP_max", dObj['DP']['max'])
 
     query.bindValue(":AI_Norm_cnt", Norm_cnt)
