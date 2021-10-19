@@ -526,31 +526,19 @@ class PostProcessor(QtCore.QObject):
 
     def plotMasyn2(self,res):
 
-        confidence = 0.95
-
-        # Calculate avg Masyn and SD
-        Masyn = [np.nanmean(res['AImag']['raw'][i]) for i in range(len(res['hours']))]
-        Masyn_CI = []
         
-        # Calculate avg Masyn (AB only) and SD
-        MasynAB, MasynAB_CI = [], []
+
+        # Calculate avg Masyn
+        Masyn = [np.nanmean(res['AImag']['raw'][i]) for i in range(len(res['hours']))]
+        
+        
+        # Calculate avg Masyn (AB only)
+        MasynAB= []
 
         for i in range(len(res['hours'])):
             AImag = res['AImag']['raw'][i]
             AI = res['b_type'][i]
 
-            l = [x for x in AImag if ~np.isnan(x)]
-            Masyn_sd = st.stats.sem(l)
-            sampleMean = np.nanmean(l)
-            n = len(l)
-            t = Masyn_sd * st.t.ppf((1 + confidence) / 2., n-1)
-            #create 95% confidence interval for the population mean
-            confidenceInterval_1 = st.norm.interval(alpha=confidence,loc=sampleMean,scale=Masyn_sd)
-            h = confidenceInterval_1[1]-sampleMean
-            Masyn_CI.append(h)
-            print(f'{t},{h},{abs(h-t)}')
-
-        
             tmp,tmp_all = [], []
             for m in range(len(AImag)):
                 if AI[m] == 'Asyn':
@@ -558,12 +546,6 @@ class PostProcessor(QtCore.QObject):
                     tmp_all.append(AImag[m])
                 else:
                     tmp_all.append(0)
-
-            
-            MasynAB_sd = st.stats.sem(tmp)
-            n2 = len(tmp)
-            h2 = MasynAB_sd * st.t.ppf((1 + confidence) / 2., n2-1)
-            MasynAB_CI.append(h2)
 
             MasynAB.append(np.nanmean(tmp_all))
 
@@ -574,8 +556,8 @@ class PostProcessor(QtCore.QObject):
             with open(fname, mode='w', newline='') as csvfile:
                 w = csv.writer(csvfile)
                 # write header
-                w.writerow(('Hour','Masyn','Masyn_std','MasynAB','MasynAB_std'))
-                l = [tuple(res['hours']),tuple(Masyn),tuple(Masyn_CI),tuple(MasynAB),tuple(MasynAB_CI)]
+                w.writerow(('Hour','Masyn','MasynAB'))
+                l = [tuple(res['hours']),tuple(Masyn),tuple(MasynAB)]
                 new_l = zip(*l)
                 for i in new_l:
                     w.writerow(i)
@@ -586,8 +568,8 @@ class PostProcessor(QtCore.QObject):
         self.ui.poAMWidget_2.canvas.ax.set_title('Average Asynchrony Magnitude in an hour')
         self.ui.poAMWidget_2.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAMWidget_2.canvas.ax.set_ylabel('Magnitude (%)')
-        self.ui.poAMWidget_2.canvas.ax.errorbar(self.xaxis, Masyn, yerr=Masyn_CI, color='C3', ls='--', marker='d', mec = 'C3', mfc = 'C3', label=r'$M_{asyn,avg}$', capsize=5)
-        self.ui.poAMWidget_2.canvas.ax.errorbar(self.xaxis, MasynAB, yerr=MasynAB_CI, marker='o', mec = 'C0', mfc = 'w', label=r'$M_{asyn,avg(AB)}$', capsize=5)
+        self.ui.poAMWidget_2.canvas.ax.plot(self.xaxis, Masyn, color='C3', ls='--', marker='d', mec = 'C3', mfc = 'C3', label=r'$M_{asyn,avg}$')
+        self.ui.poAMWidget_2.canvas.ax.plot(self.xaxis, MasynAB, marker='o', mec = 'C0', mfc = 'w', label=r'$M_{asyn,avg(AB)}$')
         self.ui.poAMWidget_2.canvas.ax.legend(loc=1)
         self.ui.poAMWidget_2.canvas.ax.set_ylim(0,100)
         self.ui.poAMWidget_2.canvas.fig.set_size_inches(14,4)

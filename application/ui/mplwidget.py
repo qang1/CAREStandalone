@@ -64,6 +64,7 @@ class MplCanvas3(Canvas):
     def __init__(self):
         self.fig = Figure()
         self.ax = self.fig.add_subplot(111)
+        self.ax.set_xlabel('Hour (24-hour notation)')
         self.fig.subplots_adjust(left=0.06, right=0.99,bottom=0.22)
         Canvas.__init__(self, self.fig)
         Canvas.setSizePolicy(self, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
