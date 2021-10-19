@@ -17,6 +17,8 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 #==============================================================================
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtSql import QSqlDatabase
+from PyQt5.QtGui import QIcon
+
 import matplotlib.pyplot as plt
 import matplotlib
 # from keras import backend as K
@@ -71,6 +73,8 @@ def main():
     db = db_handle()
     createTable(db)
     window = MainWindow(db)
+    # window.setWindowIcon(QIcon('ui/logo_outline.png'))
+    window.setWindowIcon(QIcon('ui/logo.png'))
     window.show()
     sys.exit(app.exec_())
 
