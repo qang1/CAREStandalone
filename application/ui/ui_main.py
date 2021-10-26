@@ -1225,7 +1225,7 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "CARENet Standalone"))
+        MainWindow.setWindowTitle(_translate("MainWindow", "CARE_One"))
         self.groupBox_3.setTitle(_translate("MainWindow", "Start"))
         self.label_13.setText(_translate("MainWindow", "Locate data location to start."))
         self.btn_openDirDialog.setText(_translate("MainWindow", "Choose Directory"))

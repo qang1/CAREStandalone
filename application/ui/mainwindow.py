@@ -15,7 +15,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QHeaderView, QMessageBox
 from PyQt5.QtCore import QSettings
 from PyQt5.QtSql import QSqlQuery
-
+import matplotlib.pyplot as plt
 
 # Local application imports
 from threads.worker import Worker
@@ -29,6 +29,9 @@ from ui.stacked_pbar import StackedProgressBar
 
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
+
+# set mpl figure font size and print current keras backend
+plt.rcParams.update({'font.size': 12})
 
 class MainWindow(QMainWindow):
     def __init__(self,db):

@@ -15,13 +15,10 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 #==============================================================================
 # Third-party imports
 #==============================================================================
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMessageBox, QSplashScreen 
 from PyQt5.QtSql import QSqlDatabase
-from PyQt5.QtGui import QIcon
-
-import matplotlib.pyplot as plt
-import matplotlib
-# from keras import backend as K
+from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtCore import QTimer, Qt
 
 #==============================================================================
 # Setup Logging
@@ -31,20 +28,29 @@ logging.config.fileConfig(fname=log_path, disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
 
 #==============================================================================
-# Local application imports
+# Setup System Variables
 #==============================================================================
-from ui.mainwindow import MainWindow
-from models.query import createTable
-
-# Setup imports
-# set mpl figure font size and print current keras backend
-matplotlib.use('Qt5Agg')
-plt.rcParams.update({'font.size': 12})
-# logger.info('Keras backend: '+K.backend())
-
 __author__ = 'Qing Arn Ng'
 # QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True) # enable highdpi scaling
 # sys.path.insert(1, '/application')
+
+def flashSplash():
+    
+    # Create and display the splash screen
+    splash_pix = QPixmap('ui/splash.png')
+
+    splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
+    # splash.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+    splash.setEnabled(False)
+    # By default, SplashScreen will be in the center of the screen.
+    # You can move it to a specific location if you want:
+    # splash.move(10,10)
+
+    splash.show()
+
+    # Close SplashScreen after 2 seconds (2000 ms)
+    # QTimer.singleShot(2000, splash.close)
+    return splash
 
 def db_handle():
     db = QSqlDatabase.addDatabase("QSQLITE", connectionName="dbb")
@@ -65,17 +71,23 @@ def db_handle():
 
 
 def main():
-    logger.info('Program start up')
     app = QApplication(sys.argv)
+    splash = flashSplash()
+    logger.info('Program start up')
     app.setOrganizationName("CARENet")
     app.setOrganizationDomain("caresoft.live")
     app.setApplicationName("CARENet Standalone")
     db = db_handle()
+    # ==============================================================================
+    # Local application imports
+    # ==============================================================================
+    from ui.mainwindow import MainWindow
+    from models.query import createTable
     createTable(db)
     window = MainWindow(db)
-    # window.setWindowIcon(QIcon('ui/logo_outline.png'))
     window.setWindowIcon(QIcon('ui/logo.png'))
     window.show()
+    splash.finish(window)
     sys.exit(app.exec_())
 
 if __name__ == '__main__':
