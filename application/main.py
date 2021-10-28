@@ -45,8 +45,7 @@ class ImportThread(QThread):
         self.splash = splash
 
     def run(self):
-        # ==============================================================================    
-        # Local application imports
+        """Local application pre-imports"""
         # ==============================================================================
         CAREApp.showSplashMsg(self,'Importing modules')
         from ui.mainwindow import MainWindow
