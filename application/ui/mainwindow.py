@@ -81,12 +81,15 @@ class MainWindow(QMainWindow):
     def _startBatchPros(self):
         # get all files in dirSelected
         files = [f for f in os.listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
-        files_sanitised = [f for f in files if f.endswith('.txt')]
-        files_sanitised = [f for f in files if f.startswith('patient')]
-        logger.info(f'files raw: {files}')
-        logger.info(f'files sanitised: {files_sanitised}')
-        if len(files_sanitised) != 0:
-            self.postP = PostProcessor(fname=files_sanitised,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
+        files_filtered = [f for f in files if f.endswith('.txt')]
+        files_filtered = [f for f in files_filtered if f.startswith('patient')]
+        files_filtered = [f for f in files_filtered if os.path.getsize(join(self.dirSelected, f)) > 0]
+        
+        logger.info(f'files sanitised: {files_filtered}')
+
+        # if fileList is not empty
+        if len(files_filtered) != 0:
+            self.postP = PostProcessor(fname=files_filtered,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
             self.postP_thread = QtCore.QThread()
             self.postP.moveToThread(self.postP_thread)
             self.postP_thread.started.connect(self.postP.run)

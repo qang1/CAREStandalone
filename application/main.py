@@ -66,7 +66,7 @@ class CAREApp(QApplication):
         self.setApplicationName("CARENet Standalone")
         
         # enable highdpi scaling
-        # self.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+        # self.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
     def openMainWindow(self):
         """Open the main window with any loaded files."""
@@ -121,10 +121,6 @@ class CAREApp(QApplication):
 
         splash.showMessage("Initializing...", Qt.AlignBottom | Qt.AlignCenter, Qt.black)
 
-        # By default, SplashScreen will be in the center of the screen.
-        # You can move it to a specific location if you want:
-        # splash.move(10,10)
-
         splash.show()
 
         # Close SplashScreen after 2 seconds (2000 ms)
@@ -138,7 +134,7 @@ class CAREApp(QApplication):
     def db_handle(self):
         """Create and open database"""
         db = QSqlDatabase.addDatabase("QSQLITE", connectionName="dbb")
-        db.setDatabaseName("data.sqlite")
+        db.setDatabaseName("CARETrialdata.sqlite")
         dbName = db.databaseName()
         conName = db.connectionName()
         if not db.open():
