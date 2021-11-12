@@ -8,9 +8,132 @@ Created on Wed Mar 17 11:06:47 2021
 import numpy as np
 from scipy import integrate
 import math
+import logging
+
+# Get the logger specified in the file
+logger = logging.getLogger(__name__)
+logger.info('Thread module imported')
 
 class Elastance():
 
+
+    def calcRespMechanics(self,path):
+        """Responsible for opening text file, extracting breath number,
+            splitting pressure and flow data, data filtering, and combine
+            all metrics together.
+
+        Args:
+            path (string): file path
+
+        Returns:
+            P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all
+        """
+        pressure, flow, b_num_all, b_len, rejected = [], [], [], [], []
+        P, Q, Ers_A, Rrs_A, P_A, Q_A, PEEP_A, PIP_A, TV_A, DP_A = [],[],[],[],[],[],[],[],[],[]
+        b_count = 0
+        b_counter = [0,0,0,0,0,0]
+        import time
+        start = time.process_time()
+        with open(path, "r") as f:
+            for num, line in enumerate(f):
+                if ("BS," in line) == True:
+                    b_num = self._extractBNum(line)
+                elif ("BE" in line) == True:
+                    # return this no matter what
+                    b_count += 1
+                    b_len.append(len(pressure))
+                    P.extend(pressure)          # for pltting purpose, include all 
+                    Q.extend(flow)
+                    b_num_all.append(b_num)
+
+                    # Calc and filter breath
+                    if len(pressure) >= 20:
+                        if len(pressure) == len(flow):
+                            E, R, PEEP, PIP, TidalVolume, _, _ = self.get_r(pressure, flow, True) # calculate respiratory parameter 
+                            if abs(E) < 100:
+                                if abs(R) < 100:
+                                    if TidalVolume < 1:
+                                        P_A.append(pressure)
+                                        Q_A.append(flow)
+                                        Ers_A.append(E)
+                                        Rrs_A.append(R)
+                                        PEEP_A.append(round(PEEP,1))
+                                        PIP_A.append(round(PIP,1))
+                                        TV_A.append(round(TidalVolume*1000))
+                                        DP_A.append(round(PIP-PEEP,1))
+                                        b_counter[0] += 1
+                                    else:
+                                        self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                                        rejected.append((b_num,f'THRESHOLD: VT >= 1000ml, RAW: {round(TidalVolume*1000)}'))
+                                        b_counter[1] += 1
+                                else:
+                                    self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                                    rejected.append((b_num,f'THRESHOLD: abs(R) > 100, RAW: {R}'))
+                                    b_counter[2] += 1
+                            else:
+                                self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                                rejected.append((b_num,f'THRESHOLD: abs(E) > 100, RAW: {E}'))
+                                b_counter[3] += 1
+                        else:
+                            self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                            rejected.append((b_num,f'THRESHOLD: len(pressure) != len(flow), RAW: {len(pressure)},{len(flow)}'))
+                            b_counter[4] += 1
+                    else:
+                        self._add_Nan(P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A)
+                        rejected.append((b_num,f'THRESHOLD: len(pressure) <= 20, RAW: {len(pressure)}'))
+                        b_counter[5] += 1
+
+                    # Clear P and Q temporary list
+                    pressure, flow = [], [] # reset temp list
+                else:
+                    if line != '': # Filter out empty lines
+                        section = line.split(',') # 2.34, 5.78 -> ['2.34','5.78']
+                        try:
+                            p_split = float(section[1])
+                            q_split = float(section[0])
+                            if abs(p_split) <= 100 and abs(q_split) <= 1000:
+                                if len(pressure) > 1:
+                                    # Get previous point
+                                    P_i = float(last_sec[1])
+                                    Q_i = float(last_sec[0])
+                                    last_sec = section    
+
+                                    if abs(p_split - P_i) <= 50:
+                                        if abs(q_split - Q_i) <= 100:
+                                            pressure.append(round(p_split,1))
+                                            flow.append(round(q_split,1))
+                                        else:
+                                            rejected.append((b_num,f'LINE {num}, LINE DEL: Qi-Qi-1 >= 50, RAW: {q_split}, {Q_i}'))
+                                    else:
+                                        rejected.append((b_num,f'LINE {num}, LINE DEL: Pi-Pi-1 >= 50, RAW: {p_split}, {P_i}'))
+                                else:
+                                    last_sec = section
+                                    pressure.append(round(p_split,1))
+                                    flow.append(round(q_split,1))
+                                # pressure.append(round(p_split,1))
+                                # flow.append(round(q_split,1))
+                            else:
+                                rejected.append((b_num,f'LINE DEL: abs(P)<=100 or abs(Q)<=1000, RAW: {p_split}, {q_split}'))
+                        except Exception as e:
+                            logger.info(e)
+        logger.info(f'Time used to extract breath: {time.process_time() - start}')
+        
+        debug = {
+            'rejected': rejected,
+            'b_counter': b_counter
+        }
+        return P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len, debug
+
+    def _add_Nan(self, P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A):
+        P_A.append([])
+        Q_A.append([])
+        Ers_A.append(np.nan)
+        Rrs_A.append(np.nan)
+        PEEP_A.append(np.nan)
+        PIP_A.append(np.nan)
+        TV_A.append(np.nan)
+        DP_A.append(np.nan)
+        return P_A, Q_A, Ers_A, Rrs_A, PEEP_A, PIP_A, TV_A, DP_A
     
     def _get_V(self,Q):
         b_points = np.size(Q)
@@ -113,9 +236,23 @@ class Elastance():
 
         return Ers, Rrs, PEEP_non_array, PIP, TidalVolume, IE, VE
 
+    def _extractBNum(self,line):
+        # Gets current breath number for debug, Returns 0000 when failed.
+        try:
+            b_num = [int(s) for s in line.replace(',\n','').split(':') if s.isdigit()][0]
+        except:
+            try:
+                b_num = [int(s) for s in line.replace(',\r\n','').split(':') if s.isdigit()][0]
+            except:
+                try:
+                    b_num = [int(s) for s in line.replace(',','').split(':') if s.isdigit()][0]
+                except:
+                    b_num = 0000
+        return b_num
+
 def _calcQuartiles(E, R, PEEP_A, PIP_A, TV_A, DP_A):
     """ Calc quartiles """
-    TV_A = [int(x) for x in TV_A]
+    TV_A = [np.around(x,0) for x in TV_A]
     params = ['Ers','Rrs','PEEP','PIP','TV','DP']
     paramsVal = [E, R, PEEP_A, PIP_A, TV_A, DP_A]
     rounding = [1,1,1,1,0,1]
@@ -129,9 +266,12 @@ def _calcQuartiles(E, R, PEEP_A, PIP_A, TV_A, DP_A):
     }
     for i in range(len(params)):
         dObj[params[i]]['q5'],dObj[params[i]]['q25'],dObj[params[i]]['q50'],dObj[params[i]]['q75'],dObj[params[i]]['q95'] = np.around(np.nanquantile(paramsVal[i],[.05,.25,.50,.75,.95]),rounding[i])
-        dObj[params[i]]['min'] = round(min(paramsVal[i]),rounding[i])
-        dObj[params[i]]['max'] = round(max(paramsVal[i]),rounding[i])
+        dObj[params[i]]['min'] = round(np.nanmin(paramsVal[i]),rounding[i])
+        dObj[params[i]]['max'] = round(np.nanmax(paramsVal[i]),rounding[i])
     # chg to int to rmv rounding digit
-    # dObj['TV']['q5'],dObj['TV']['q25'],dObj['TV']['q50'],dObj['TV']['q75'],dObj['TV']['q95'] = dObj['TV']['q5'].astype(int) ,dObj['TV']['q25'].astype(int) ,dObj['TV']['q50'].astype(int) ,dObj['TV']['q75'].astype(int) ,dObj['TV']['q95'].astype(int)
+    dObj['TV']['q5'],dObj['TV']['q25'],dObj['TV']['q50'],dObj['TV']['q75'],dObj['TV']['q95'] = dObj['TV']['q5'].astype(int) ,dObj['TV']['q25'].astype(int) ,dObj['TV']['q50'].astype(int) ,dObj['TV']['q75'].astype(int) ,dObj['TV']['q95'].astype(int)
     
     return dObj
+
+
+

@@ -25,6 +25,12 @@ class StackedProgressBar(QWidget):
             Qt.CustomizeWindowHint |
             Qt.WindowTitleHint
             )
+
+        self.setWindowTitle('Loading')
+        width = 550
+        height = 100
+        self.setMinimumSize(width, height)
+
         font = QtGui.QFont()
         font.setPointSize(10)
 
@@ -53,8 +59,7 @@ class StackedProgressBar(QWidget):
         self.layout.addWidget(self.main_pbar)
 
         self.setLayout(self.layout)
-        self.setGeometry(300, 300, 550, 100)
-        self.setWindowTitle('Loading')
+        
 
     def show_pbar(self):  # To restart the progress every time
         self.show()

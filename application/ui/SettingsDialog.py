@@ -8,6 +8,10 @@ else:
 
 from PyQt5.QtWidgets import QApplication, QWidget, QDialog
 import sys
+import logging
+
+# Get the logger specified in the file
+logger = logging.getLogger(__name__)
 
 class MainWindow(QWidget):
     def __init__(self, parent=None):
@@ -40,6 +44,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.ui.setupUi(self)
         # self.settings = QSettings("My Organization", "My Application")
         self.settings = QSettings()
+        # self.settings.value('saveDB',True, type=bool)
         self.initUI()
 
     def initUI(self):
@@ -48,18 +53,31 @@ class SettingsDialog(QtWidgets.QDialog):
             self.ui.plotRes30min.setChecked(True)
         elif self.settings.value('resolution') == '1hour':
             self.ui.plotRes1hour.setChecked(True)
+
+        if self.settings.value('saveDB', True, type=bool) == True:
+            self.ui.saveDBTrue.setChecked(True)
+        else:
+            self.ui.saveDBFalse.setChecked(True)
         
         
     def saveSettings(self,key,value):
         self.settings.setValue(key,value)
     
     def accept(self):
+        
         if self.ui.plotRes30min.isChecked():
-            print(f'Plot resolution: 30mins')
+            logger.info(f'Plot resolution set: 30mins')
             self.settings.setValue('resolution','30mins')
-        elif self.ui.plotRes1hour.isChecked():
-            print(f'Plot resolution: 1hour')
+        else:
+            logger.info(f'Plot resolution set: 1hour')
             self.settings.setValue('resolution','1hour')
+
+        if self.ui.saveDBTrue.isChecked():
+            logger.info(f'Save DB set: True')
+            self.settings.setValue('saveDB',True)
+        else:
+            logger.info(f'Save DB set: False')
+            self.settings.setValue('saveDB',False)
         self.close()
 
 # Tests
