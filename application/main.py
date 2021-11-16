@@ -1,3 +1,25 @@
+#!/usr/bin/env python
+
+#    Copyright (C) 2021 CARE Trial
+#    Email: CARE Trial <care.trial.2019@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+##############################################################################
+
+"""Main CARE_One excecutable."""
+
 # =============================================================================
 # Standard library imports
 # =============================================================================
@@ -31,13 +53,15 @@ logger = logging.getLogger(__name__)
 # Setup System Variables
 #==============================================================================
 __author__ = 'Qing Arn Ng'
+__version__ = '0.1.0'
 # sys.path.insert(1, '/application')
 
 
 
 class ImportThread(QThread):
-    '''Do import of main code within another thread.
-    Main application runs when this is done
+    '''
+    Do import of main code within another thread.
+    Main application runs when this is done.
     '''
 
     def __init__(self,splash):
@@ -47,13 +71,13 @@ class ImportThread(QThread):
     def run(self):
         """Local application pre-imports"""
         # ==============================================================================
-        CAREApp.showSplashMsg(self,'Importing modules')
+        CAREApp.showSplashMsg(self,f'Version: {__version__}\nImporting modules')
         from ui.mainwindow import MainWindow
 
-        CAREApp.showSplashMsg(self,'Checking database')
+        CAREApp.showSplashMsg(self,f'Version: {__version__}\nChecking database')
         from models.query import createTable
 
-        CAREApp.showSplashMsg(self,'Starting up')
+        CAREApp.showSplashMsg(self,f'Version: {__version__}\nStarting up')
         
 
 
@@ -65,7 +89,7 @@ class CAREApp(QApplication):
         self.setOrganizationDomain("caresoft.live")
         self.setApplicationName("CARENet Standalone")
         
-        # enable highdpi scaling
+        # uncomment to enable highdpi scaling
         # self.setAttribute(Qt.AA_EnableHighDpiScaling, True)
 
     def openMainWindow(self):
@@ -90,7 +114,7 @@ class CAREApp(QApplication):
         
 
     def slotStartApplication(self):
-        """Start app, after modules imported."""
+        """Start application after modules imported."""
         from models.query import createTable
 
         self.db = self.db_handle()
@@ -111,8 +135,10 @@ class CAREApp(QApplication):
         splash_pix = QPixmap('ui/splash.png')
 
         splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
-        # splash.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         splash.setEnabled(False)
+
+        # uncomment to set additional flags to splashscreen
+        # splash.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
 
         # Set splash font size
         splash_font = splash.font()

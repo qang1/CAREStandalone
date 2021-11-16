@@ -1,28 +1,54 @@
+#!/usr/bin/env python
+
+#    Copyright (C) 2021 CARE Trial
+#    Email: CARE Trial <care.trial.2019@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+##############################################################################
+
+"""Patient Overview module."""
+
+# =============================================================================
 # Standard library imports
-from multiprocessing.pool import ThreadPool
+# =============================================================================
 import statistics
-import time
 import json
 import csv
-import os
 
-# Third party imports
-from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, QSettings
-from PyQt5 import QtCore, QtGui, QtWidgets
+#==============================================================================
+# Third-party imports
+#==============================================================================
+from PyQt5.QtCore import pyqtSignal, QSettings, QObject, Qt
+from PyQt5 import QtGui, QtWidgets
 from PyQt5.QtSql import  QSqlQuery
 import numpy as np
 import logging
-from keras import backend as K
-import scipy.stats as st
 
+#==============================================================================
 # Local application imports
-from calculations import Elastance, _calcQuartiles
+#==============================================================================
+from utils.calculations import Elastance
 from utils.AI import get_current_model, AIpredict, load_Recon_Model, recon, saveDb
 
+#==============================================================================
+# Setup Logging
+#==============================================================================
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
 
-class PostProcessor(QtCore.QObject):
+class PatientOverview(QObject):
     finished = pyqtSignal()
     processResMulti = pyqtSignal(object)
     open_pbar = pyqtSignal()
@@ -31,7 +57,7 @@ class PostProcessor(QtCore.QObject):
     update_mainpbar = pyqtSignal(int,str)
 
     def __init__(self,fname,dirSelected,db,ui):
-        super(PostProcessor, self).__init__()
+        super(PatientOverview, self).__init__()
         self.fname = fname
         self.dirSelected = dirSelected
         self.db = db
@@ -49,7 +75,7 @@ class PostProcessor(QtCore.QObject):
         # If not, append filename to no_results list to process.
         for f in self.fname:
             try:
-                dObj = self.fetchDb(f)
+                dObj = self.fetch_db(f)
                 sum_results.append(dObj)
             except:
                 no_results.append(f)
@@ -60,7 +86,7 @@ class PostProcessor(QtCore.QObject):
         if len(no_results) != 0:
             new_results = []
             for f in no_results:
-                dObj = self.fun(f)
+                dObj = self.getRespMech(f)
                 new_results.append(dObj)
             new_results = self._get_prediction(new_results)
             new_results = self._get_recon(new_results)
@@ -71,17 +97,14 @@ class PostProcessor(QtCore.QObject):
             sum_results = sorted(sum_results, key=lambda k: k['hour'])
 
         # Plot in 30 minutes to increase trend detail
-        chopHalf = self.settings.value('resolution') == '30mins'
-        if chopHalf == True:
-            logging.info(f'Plot resolution (30mins): {chopHalf}')
-            sum_results = self.calcHalf(sum_results)
-
- 
+        cut_half_opt = self.settings.value('resolution') == '30mins'
+        if cut_half_opt == True:
+            logging.info(f'Plot resolution (30mins): {cut_half_opt}')
+            sum_results = self.cut_breath_half(sum_results)
 
         # Finalize, process, and display data
         self.update_subpbar.emit(100,f'Processing complete. Populating result...')
         self.handle_result(sum_results)
-
     
     def updateStatus(self):
         perCmpl = round(self.cnt/self.total*100,2)
@@ -94,29 +117,37 @@ class PostProcessor(QtCore.QObject):
         self.update_mainpbar.emit(perCmpl,f"Total: Processing file {cnt}/{total}")
         logger.info(f"Processing file {cnt}/{total}")
 
-    def fetchDb(self,f):
-        _, p_no, date, hour = f.replace('.txt','').split('_')
+    def fetch_db(self, fname):
+        """
+        Fetch results from database
+
+        Args:
+            fname (str): str filename
+
+        Returns:
+            dObj [dict]: results dictionary
+        """
+        
+        _, p_no, date, hour = fname.replace('.txt','').split('_')
         logger.info(f'DB lookup.Params - p_no: {p_no}; date: {date}; hour: {hour}')
         query = QSqlQuery(self.db)
-        query.exec(f"""SELECT p, q, Ers_raw, Rrs_raw, b_count, b_type, b_len,
+        query.exec(f"""SELECT Ers_raw, Rrs_raw, b_count, b_type, b_len,
                         PEEP_raw, PIP_raw, TV_raw, DP_raw, AM_raw  FROM results 
                         WHERE p_no='{p_no}' AND date='{date}' AND hour='{hour}';
                         """)
         if query.next():
             query.first()
-            P = json.loads(query.value(0))
-            Q = json.loads(query.value(1))
-            Ers = json.loads(query.value(2))
-            Rrs = json.loads(query.value(3))
-            b_count = query.value(4)
-            b_type = json.loads(query.value(5))
-            b_len = json.loads(query.value(6))
-            PEEP_A = json.loads(query.value(7))
-            PIP_A = json.loads(query.value(8))
-            TV_A = json.loads(query.value(9))
-            DP_A = json.loads(query.value(10))
-            AM_raw = json.loads(query.value(11))
-            logger.info('DB entry found. Breath count: %s', b_count)
+            Ers = json.loads(query.value(0))
+            Rrs = json.loads(query.value(1))
+            b_count = query.value(2)
+            b_type = json.loads(query.value(3))
+            b_len = json.loads(query.value(4))
+            PEEP_A = json.loads(query.value(5))
+            PIP_A = json.loads(query.value(6))
+            TV_A = json.loads(query.value(7))
+            DP_A = json.loads(query.value(8))
+            AM_raw = json.loads(query.value(9))
+            logger.info('DB entry found. P_no: %s', p_no)
 
             dObj = {
                 'p_no': p_no,
@@ -139,9 +170,9 @@ class PostProcessor(QtCore.QObject):
             logger.warning(f'{self.db.lastError().text()}')
             raise Exception
 
-    def calcHalf(self,input_results):
+    def cut_breath_half(self,input_results):
         """
-        Seperates incoming dictionary of 1 hour input results
+        Cut incoming dictionary of 1 hour input results
         to 30 minutes interval. Splits half by breath count.
             
         *Assume there is complete number of breath in an hour.
@@ -220,17 +251,25 @@ class PostProcessor(QtCore.QObject):
                 sum_results.append(Secondhalf_dObj)
         return sum_results
 
-    def fun(self,arg):
-        self.update_subpbar.emit(10,f"Processing file {arg}")
-        path = self.dirSelected + '/' + arg
-        _, p_no, date, hour = arg.replace('.txt','').split('_')
+    def getRespMech(self, fname):
+        """Get Respiratory Mechanics from Elastance module
+
+        Args:
+            fname ([str]): filename of data file to be analysed
+
+        Returns:
+            dObj[dict]: results of analysis
+        """
+        self.update_subpbar.emit(10,f"Processing file {fname}")
+        path = self.dirSelected + '/' + fname
+        _, p_no, date, hour = fname.replace('.txt','').split('_')
         
-        logger.info(f'Calculating results... {arg}')
-        self.update_subpbar.emit(20,f"Calculating results... {arg}")
+        logger.info(f'Calculating results... {fname}')
+        self.update_subpbar.emit(20,f"Calculating results... {fname}")
         P, Q, P_A, Q_A, Ers_A, Rrs_A, b_count, PEEP_A, PIP_A, TV_A, DP_A, b_num_all, b_len, debug = Elastance().calcRespMechanics(path)
        
         logger.info('Calculation completed')
-        self.update_subpbar.emit(30,f"Calculation completed... {arg}")
+        self.update_subpbar.emit(30,f"Calculation completed... {fname}")
             
         dObj = {
             'p_no': p_no,
@@ -255,10 +294,11 @@ class PostProcessor(QtCore.QObject):
         self.updateStatus()
         
         return dObj
-
    
     def _get_prediction(self,sum_results):
-
+        """
+        Get breath type prediction
+        """
         logger.info(f'Loading model...')
         self.update_subpbar.emit(40,f'Loading model...')
         model_name, self.PClassiModel = get_current_model()
@@ -281,7 +321,9 @@ class PostProcessor(QtCore.QObject):
         return sum_results
 
     def _get_recon(self,sum_results):
-
+        """
+        Get breath magnitude prediction
+        """
         logger.info(f'Loading recon model...')
         self.update_subpbar.emit(50,f'Loading recon model...')
         reconModel = load_Recon_Model()
@@ -305,6 +347,9 @@ class PostProcessor(QtCore.QObject):
         return sum_results
 
     def saveResults(self,sum_results):
+        """
+        Save results to db
+        """
         self.update_subpbar.emit(90,f'Saving results...')
         for results in sum_results:
             P = results['P']
@@ -328,7 +373,7 @@ class PostProcessor(QtCore.QObject):
 
     def handle_result(self,sum_results):
         """
-        "" Handles post processing of results after calculation
+        Handles post processing of results after calculation
         """
         logger.info('PostProcessor.handle_result(): task finished')
         r_dialy = self.combine_allday_breath(sum_results)
@@ -352,7 +397,7 @@ class PostProcessor(QtCore.QObject):
         """Combine multiple hours into all day list
 
         Args:
-            dObj (list): [description]
+            dObj (dict): [description]
 
         Returns:
             result [dict]: [description]
@@ -419,26 +464,27 @@ class PostProcessor(QtCore.QObject):
         font.setPointSize(12)
         for i in range(len(params)):
             item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignCenter)
             item.setFont(font)
             item.setText(str(r_dialy[params[i]]['q5']))
             self.ui.tableWidget_2.setItem(0, i, item)
             item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignCenter)
             item.setFont(font)
             item.setText(str(r_dialy[params[i]]['q50']) + '\n [ ' +  str(r_dialy[params[i]]['q25']) + ' - ' + str(r_dialy[params[i]]['q75']) + ' ] ')
             self.ui.tableWidget_2.setItem(1, i, item)
             item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignCenter)
             item.setFont(font)
             item.setText(str(r_dialy[params[i]]['q95']))
             self.ui.tableWidget_2.setItem(2, i, item)
         
-    def rm_nan(self,input):
-        """Removes nan from sublists in master lists
+    def remove_list_nan(self,input):
+        """
+        Removes nan values from sublists in master lists
 
         Args:
             input (list): [[1,2,nan],[5,7,8],[...]]
@@ -453,7 +499,7 @@ class PostProcessor(QtCore.QObject):
     
     def plotBox(self,res):
         """
-        "" Plot boxplot of resp mechanics
+        Plot boxplot of resp mechanics
         """
         # rm_nan = lambda input: [a for a in input if ~np.isnan(a)] 
         # define lists for mpl plots
@@ -470,11 +516,9 @@ class PostProcessor(QtCore.QObject):
             plots[i].ax.set_title(titles[i])
             plots[i].ax.set_xlabel('Hour (24-hour notation)')
             plots[i].ax.set_ylabel(y_labels[i])
-            plots[i].ax.boxplot( self.rm_nan(res[params[i]]['raw']),labels = self.xaxis, showfliers = False)
+            plots[i].ax.boxplot( self.remove_list_nan(res[params[i]]['raw']),labels = self.xaxis, showfliers = False)
             plots[i].ax.set_xticklabels(self.xaxis, rotation = self.rot_angle)
             plots[i].draw()
-        
-        self.ui.poAMWidget.canvas.ax.set_ylim(0,100)
 
         for i in range(len(plots)):
             try:
@@ -485,7 +529,7 @@ class PostProcessor(QtCore.QObject):
 
     def plotAIBar(self,res):
         """
-        "" Plot barchart of Asynchrony analysis
+        Plot barchart of Asynchrony analysis
         """
         
         b_types = res['b_type']
@@ -525,8 +569,6 @@ class PostProcessor(QtCore.QObject):
         annot = self.ui.poAIWidget.canvas.ax.annotate(text, xy=(x,y), xytext=(-20,2),textcoords="offset points")
 
     def plotMasyn2(self,res):
-
-        
 
         # Calculate avg Masyn
         Masyn = [np.nanmean(res['AImag']['raw'][i]) for i in range(len(res['hours']))]
@@ -585,7 +627,7 @@ class PostProcessor(QtCore.QObject):
         self.ui.poAMWidget_3.canvas.ax.set_xlabel('Hour (24-hour notation)')
         self.ui.poAMWidget_3.canvas.ax.set_ylabel('%')
         self.ui.poAMWidget_3.canvas.ax.set_ylim(0,100)
-        self.ui.poAMWidget_3.canvas.ax.boxplot( self.rm_nan(Masyn_AB), labels = self.xaxis, showfliers = False)
+        self.ui.poAMWidget_3.canvas.ax.boxplot( self.remove_list_nan(Masyn_AB), labels = self.xaxis, showfliers = False)
         self.ui.poAMWidget_3.canvas.ax.set_xticklabels(self.xaxis, rotation = self.rot_angle)
         self.ui.poAMWidget_3.canvas.draw()
         self.ui.poAMWidget_3.canvas.fig.set_size_inches(14,4)

@@ -1,18 +1,43 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Mar 17 11:06:47 2021
+#!/usr/bin/env python
 
-@author: ngqin
+#    Copyright (C) 2021 CARE Trial
+#    Email: CARE Trial <care.trial.2019@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+##############################################################################
+
+"""
+Calculations module.
+- Calculates Respiratory Mechanics (Elastance/Resistance) & Ventilation parameters
+- Runs others mathematical calculations
 """
 
-import numpy as np
+# =============================================================================
+# Standard library imports
+# =============================================================================
 from scipy import integrate
-import math
+import numpy as np
 import logging
+import math
 
+#==============================================================================
+# Setup Logging
+#==============================================================================
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
-logger.info('Thread module imported')
+
 
 class Elastance():
 
@@ -140,7 +165,6 @@ class Elastance():
         Time = list(np.linspace(0, (b_points-1)*0.02, b_points))
         return integrate.cumtrapz(Q, x=Time, initial=0)
 
-
     def _seperate_breath(self,temp_pressure,temp_flow):
         # add 5 data points in future so that will avoid the 1st digit as negative
         Fth = 5
@@ -168,7 +192,6 @@ class Elastance():
         # pressure_expi_T = pressure_expi[flow_expi_loc_starts::]
 
         return flow_inspi,flow_expi,pressure_inspi,pressure_expi
-
 
     def get_r(self,P,Q,useIM):
         temp_flow = np.array(Q)/60

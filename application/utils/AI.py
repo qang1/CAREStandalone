@@ -1,27 +1,63 @@
+#!/usr/bin/env python
+
+#    Copyright (C) 2021 CARE Trial
+#    Email: CARE Trial <care.trial.2019@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+##############################################################################
+
+"""
+AI module. 
+- for AI/machine learning functions
+"""
+
+# =============================================================================
+# Standard library imports
+# =============================================================================
+import logging
+import random
+import json
 import os
+
+#==============================================================================
+# Third-party imports
+#==============================================================================
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import load_model
 from scipy.interpolate import interp1d
-import numpy as np
-import random
-import logging
-import json
 from PyQt5.QtSql import  QSqlQuery
-from pathlib import Path
 from scipy import trapz
+import numpy as np
 
-from calculations import _calcQuartiles
+#==============================================================================
+# Local application imports
+#==============================================================================
+from .calculations import _calcQuartiles
 
+#==============================================================================
+# Setup Logging
+#==============================================================================
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
-
 base_path = os.path.abspath(os.path.dirname(__file__))
 
 
 def get_current_model():
     """ Load model """
     logger.info('Now Loading The Trained Model.')
-    model_name = 'CNNPressureClassificataion.hdf5'
+    model_name = 'CNNPressureClassificationModel.hdf5'
     PClassiModel = load_model(os.path.join(base_path,'..\src',model_name))
     logger.info('Classification Model loaded successfully.')
     return model_name, PClassiModel
@@ -44,11 +80,11 @@ def AIpredict(input_data, PClassiModel):
     Preds = PClassiModel.predict(preprocessed_data.reshape(1,150,1)) # this line classifies the type of breathing cycle
     out = np.argmax(Preds)
     
-    if out == 0: # Normal
+    if out == 0: # Normal breath
         return('Normal')
-    elif out == 1: # Asyn
+    elif out == 1: # Asyn breath
         return('Asyn')
-    elif out == 2: #noise
+    elif out == 2: #noise breath
         return('Normal')
     else: 
         return('Normal')
@@ -65,16 +101,16 @@ def norma_resample(input_data, data_size):
     return immatrix_p
 
 def load_Recon_Model():
-    model_name = 'best_model1.hdf5'
+    model_name = 'ABReCAPressureFlowReconstructionModel.hdf5'
     ReconModel = load_model(os.path.join(base_path,'..\src',model_name))
     return ReconModel
 
-def recon(flow,temp_pressure,ReconModel):
+def recon(flow, pressure, ReconModel):
     """Predict Asynchrony magnitude using pressure reconstruction
 
     Args:
         flow (list): flow
-        temp_pressure (list): pressure list
+        pressure (list): pressure list
         ReconModel ([type]): reconstruction trained model
 
     Returns:
@@ -102,7 +138,7 @@ def recon(flow,temp_pressure,ReconModel):
     flow_expi = flow_expi[flow_expi_loc_starts::]
     
     #% Pressure Inspiration and expiration
-    pressure_inspi = temp_pressure[0:flow_inspi_loc_ends+Fth]
+    pressure_inspi = pressure[0:flow_inspi_loc_ends+Fth]
     
     temp = norma_resample(pressure_inspi,64)
     
@@ -223,17 +259,17 @@ def saveDb(db, P, Q, Ers, Rrs, b_count, b_type, PEEP, PIP, TV, DP, AImag, b_num_
     
     query.bindValue(":Ers_min", float(dObj['Ers']['min']))
     query.bindValue(":Rrs_min", float(dObj['Rrs']['min']))
-    query.bindValue(":PEEP_min", dObj['PEEP']['min'])
-    query.bindValue(":PIP_min", dObj['PIP']['min'])
+    query.bindValue(":PEEP_min", float(dObj['PEEP']['min']))
+    query.bindValue(":PIP_min", float(dObj['PIP']['min']))
     query.bindValue(":TV_min", int(dObj['TV']['min']))
-    query.bindValue(":DP_min", dObj['DP']['min'])
+    query.bindValue(":DP_min", float(dObj['DP']['min']))
     
     query.bindValue(":Ers_max", float(dObj['Ers']['max']))
     query.bindValue(":Rrs_max", float(dObj['Rrs']['max']))
-    query.bindValue(":PEEP_max", dObj['PEEP']['max'])
-    query.bindValue(":PIP_max", dObj['PIP']['max'])
+    query.bindValue(":PEEP_max", float(dObj['PEEP']['max']))
+    query.bindValue(":PIP_max", float(dObj['PIP']['max']))
     query.bindValue(":TV_max", int(dObj['TV']['max']))
-    query.bindValue(":DP_max", dObj['DP']['max'])
+    query.bindValue(":DP_max", float(dObj['DP']['max']))
 
     query.bindValue(":AI_Norm_cnt", Norm_cnt)
     query.bindValue(":AI_Asyn_cnt", Asyn_cnt)

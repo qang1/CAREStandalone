@@ -1,36 +1,52 @@
-"""MainWindow
+#!/usr/bin/env python
 
-Returns:
-    [type]: [description]
-"""
+#    Copyright (C) 2021 CARE Trial
+#    Email: CARE Trial <care.trial.2019@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+##############################################################################
+
+"""Main window."""
 
 # Standard library imports
 from os.path import isfile, join
+import logging
 import csv
 import os
-import logging
 
 # Third party imports
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QHeaderView, QMessageBox
-from PyQt5.QtCore import QSettings
+from PyQt5.QtWidgets import QMainWindow, QFileDialog, QHeaderView, QMessageBox, QTableWidgetItem
+from PyQt5.QtCore import QSettings, Qt, QThread
 from PyQt5.QtSql import QSqlQuery
+from PyQt5.QtGui import QFont
 import matplotlib.pyplot as plt
 
 # Local application imports
-from threads.worker import Worker
-from threads.PostProcessor import PostProcessor
+from threads.PatientOverview import PatientOverview
+from threads.HourlyView import HourlyView
 from ui.ui_main import Ui_MainWindow
 from ui.AboutDialog import AboutDialog
 from ui.SettingsDialog import SettingsDialog
-from ui.pbar import PopUpProgressBar
 from ui.stacked_pbar import StackedProgressBar
+from ui.pbar import PopUpProgressBar
 
 
 # Get the logger specified in the file
 logger = logging.getLogger(__name__)
 
-# set mpl figure font size and print current keras backend
+# set mpl figure font size
 plt.rcParams.update({'font.size': 12})
 
 class MainWindow(QMainWindow):
@@ -45,10 +61,7 @@ class MainWindow(QMainWindow):
         self._connectSignals()
         self.db = db
         self._setTableHeader()
-        self.ui.PO_tabWidget.setTabVisible(8,False)
-        self.ui.PO_tabWidget.setTabVisible(9,False)
 
-    
     def _setTableHeader(self):
         labels = ['Ers\n(cmH\u2082O/L)','Rrs\n(cmH\u2082Os/L)','PEEP\n(cmH\u2082O)','PIP\n(cmH\u2082O)','Vₜ\n(mL)','PIP-PEEP\n(cmH\u2082O)']
         for i in range(len(labels)):
@@ -58,16 +71,18 @@ class MainWindow(QMainWindow):
     def _openFileNameDialog(self):
         self.ui.btn_openFDialog.setEnabled(False)
         self.ui.btn_export.setEnabled(False)
-        options = QFileDialog.Options()
-        fileName, _ = QFileDialog.getOpenFileName(self,"Locate raw data file to analyze...", "","Text Files (*.txt)", options=options)
+        fileName, _ = QFileDialog.getOpenFileName(self,"Locate raw data file to analyze...", "","Text Files (*.txt)", options=QFileDialog.Options())
         if fileName:
             self.fname = fileName
-            self._listFileDetails(fileName)
+            fname = self.fname.split('/')[-1].replace('.txt','')
+            self.ui.label_pat_no.setText(fname.split('_')[1])
+            self.ui.label_date.setText(fname.split('_')[2])
+            self.ui.label_hour.setText(fname.split('_')[3])
+            self.hour = fname.split('_')[3]
             self.start_thread()
         else:
             self.ui.btn_openFDialog.setEnabled(True)  # Re-enable choose btn if user cancel on file selection dialog
-
-    
+ 
     def _openFileDirectory(self):
 
         dirSelected = str(QFileDialog.getExistingDirectory(self, "Locate directory to analyze...",str(QSettings().value('DEFAULT_DIR'))))
@@ -85,12 +100,12 @@ class MainWindow(QMainWindow):
         files_filtered = [f for f in files_filtered if f.startswith('patient')]
         files_filtered = [f for f in files_filtered if os.path.getsize(join(self.dirSelected, f)) > 0]
         
-        logger.info(f'files sanitised: {files_filtered}')
+        logger.info(f'Files filtered: {files_filtered}')
 
         # if fileList is not empty
         if len(files_filtered) != 0:
-            self.postP = PostProcessor(fname=files_filtered,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
-            self.postP_thread = QtCore.QThread()
+            self.postP = PatientOverview(fname=files_filtered,dirSelected=self.dirSelected,db=self.db,ui=self.ui)
+            self.postP_thread = QThread()
             self.postP.moveToThread(self.postP_thread)
             self.postP_thread.started.connect(self.postP.run)
             self.postP_thread.start()
@@ -117,6 +132,7 @@ class MainWindow(QMainWindow):
         self.ui.statusBar.showMessage("Processing completed.")
         self.ui.btn_PO_reset.setEnabled(True)
         self.ui.btn_PO_export.setEnabled(True)
+        self.ui.btn_openDirDialog.setEnabled(False)
         self.ui.label_PO_p_no.setText(res['p_no'])
         self.ui.label_PO_date.setText(res['date'])
         if self.settings.value('resolution') == '30mins':
@@ -129,15 +145,7 @@ class MainWindow(QMainWindow):
         # resize table widget (can't be done on thread for some reasons)
         self.ui.tableWidget_2.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.ui.tableWidget_2.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-
-
-    def _listFileDetails(self,fullFileName):
-        fname = fullFileName.split('/')[-1].replace('.txt','')
-        self.ui.label_pat_no.setText(fname.split('_')[1])
-        self.ui.label_date.setText(fname.split('_')[2])
-        self.ui.label_hour.setText(fname.split('_')[3])
-        self.hour = fname.split('_')[3]
-    
+   
     def _resetScreen(self):
         self.ui.graphWidget.canvas.ax.cla()
         self.ui.boxGraphWidget.canvas.ax1.cla()
@@ -171,8 +179,7 @@ class MainWindow(QMainWindow):
         # Clear plots
         plots = [self.ui.poErsWidget.canvas, self.ui.poRrsWidget.canvas, self.ui.poPIPWidget.canvas,
                 self.ui.poPEEPWidget.canvas, self.ui.poVtWidget.canvas, self.ui.poDpWidget.canvas,
-                self.ui.poAIWidget.canvas, self.ui.poAMWidget.canvas, self.ui.poAMWidget_2.canvas,
-                self.ui.poAMWidget_3.canvas]
+                self.ui.poAIWidget.canvas, self.ui.poAMWidget_2.canvas]
         for i in range(len(plots)):
             plots[i].ax.cla()
             plots[i].draw()
@@ -187,9 +194,9 @@ class MainWindow(QMainWindow):
         self.ui.statusBar.showMessage("Screen refreshed")
         # self.ui.btn_startBatchPros.setEnabled(True)
         self.ui.btn_PO_export.setEnabled(False)
+        self.ui.btn_openDirDialog.setEnabled(True)
         self.ui.btn_PO_reset.setEnabled(False)
-
-        
+       
     def _connectSignals(self):
         """Connect signals and slots."""
         # Action tab
@@ -205,7 +212,6 @@ class MainWindow(QMainWindow):
         self.ui.btn_startBatchPros.clicked.connect(self._startBatchPros)
         self.ui.btn_PO_reset.clicked.connect(self._resetPO)
         self.ui.btn_PO_export.clicked.connect(self._exportPO)
-
 
     def _exportPO(self):
         files = [f for f in os.listdir(self.dirSelected) if isfile(join(self.dirSelected, f))]
@@ -313,8 +319,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(None, ("Cannot write file"),
                                 ('Error writing file: \n' + str(e)),
                 QMessageBox.Cancel)
-            
-        
+                
     def _updateUI(self):
         """ Update UI and status after calculation done"""
         # Update UI and status
@@ -359,27 +364,27 @@ class MainWindow(QMainWindow):
 
     def start_thread(self,**kwargs):
         self.ui.statusBar.showMessage("Processing Data")
-        self.worker = Worker(fname=self.fname,db=self.db,ui=self.ui)
-        self.worker_thread = QtCore.QThread()
-        self.worker.setObjectName('Worker')
-        self.worker_thread.setObjectName('WorkerThread')
-        self.worker.moveToThread(self.worker_thread)
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker.printDebug.connect(self._printDebug)
-        self.worker.writeTable.connect(self._writeTable)
-        self.worker.open_pbar.connect(self._openPbar)
-        self.worker.update_pbar.connect(self._updatePbar)
-        self.worker.update_UI.connect(self._updateUI)
-        self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.done.connect(self.stop_thread)
-        self.worker_thread.start()
-        logger.info('Worker thread started')
+        self.HVWorker = HourlyView(fname=self.fname,db=self.db,ui=self.ui)
+        self.HVWorker_thread = QThread()
+        self.HVWorker.setObjectName('HourlyView')
+        self.HVWorker_thread.setObjectName('HourlyViewThread')
+        self.HVWorker.moveToThread(self.HVWorker_thread)
+        self.HVWorker_thread.started.connect(self.HVWorker.run)
+        self.HVWorker.printDebug.connect(self._printDebug)
+        self.HVWorker.writeTable.connect(self._writeTable)
+        self.HVWorker.open_pbar.connect(self._openPbar)
+        self.HVWorker.update_pbar.connect(self._updatePbar)
+        self.HVWorker.update_UI.connect(self._updateUI)
+        self.HVWorker.finished.connect(self.HVWorker_thread.quit)
+        self.HVWorker.done.connect(self.stop_thread)
+        self.HVWorker_thread.start()
+        logger.info('HourlyView Worker thread started')
 
     def stop_thread(self):
-        self.worker_thread.requestInterruption()
-        if self.worker_thread.isRunning():
-            self.worker_thread.quit()
-            self.worker_thread.wait()
+        self.HVWorker_thread.requestInterruption()
+        if self.HVWorker_thread.isRunning():
+            self.HVWorker_thread.quit()
+            self.HVWorker_thread.wait()
             logger.info('qthread stopped')
         else:
             logger.info('worker has already exited.')
@@ -398,40 +403,26 @@ class MainWindow(QMainWindow):
     def _writeTable(self,res):
         """ Display info on first table """
         params = ['Ers','Rrs','PEEP','PIP','TV','DP']
-        font = QtGui.QFont()
+        font = QFont()
         font.setPointSize(12)
         for i in range(len(params)):
-            item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item = QTableWidgetItem()
+            item.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignCenter)
             item.setFont(font)
             item.setText(str(res[params[i]]['q5']))
             self.ui.tableWidget.setItem(0, i, item)
-            item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item = QTableWidgetItem()
+            item.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignCenter)
             item.setFont(font)
             item.setText(str(res[params[i]]['q50']) + '\n [ ' +  str(res[params[i]]['q25']) + ' - ' + str(res[params[i]]['q75']) + ' ] ')
             self.ui.tableWidget.setItem(1, i, item)
-            item = QtWidgets.QTableWidgetItem()
-            item.setFlags(QtCore.Qt.ItemIsUserCheckable|QtCore.Qt.ItemIsEnabled)
-            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item = QTableWidgetItem()
+            item.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignCenter)
             item.setFont(font)
             item.setText(str(res[params[i]]['q95']))
             self.ui.tableWidget.setItem(2, i, item)
 
 
-
-
-
-
-
-
-
-
-if __name__ == '__main__':
-    import sys
-    app = QApplication(sys.argv)
-    window = Window()
-    window.show()
-    sys.exit(app.exec_())
